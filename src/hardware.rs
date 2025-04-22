@@ -16,6 +16,7 @@ use crate::path;
 use crate::platform::{platform_config, ServiceConfig};
 use crate::process::{run_script, script_exit_code};
 use crate::systemd::SystemdUnit;
+use tracing::debug;
 
 const SYS_VENDOR_PATH: &str = "/sys/class/dmi/id/sys_vendor";
 const BOARD_NAME_PATH: &str = "/sys/class/dmi/id/board_name";
@@ -78,12 +79,13 @@ pub(crate) async fn device_variant() -> Result<(DeviceType, String)> {
     let product_name = product_name.trim_end();
     let board_name = fs::read_to_string(path(BOARD_NAME_PATH)).await?;
     let board_name = board_name.trim_end();
+    debug!("Device variant: {sys_vendor} {product_name} {board_name}");
     Ok(match (sys_vendor.trim_end(), product_name, board_name) {
         ("LENOVO", "83L3" | "83N6" | "83Q2" | "83Q3", _) => {
             (DeviceType::LegionGoS, product_name.to_string())
         }
         ("Valve", _, "Jupiter" | "Galileo") => (DeviceType::SteamDeck, board_name.to_string()),
-        ("GPD", _, _) => (DeviceType::Generic, String::from("generic")),
+        ("GPD", _, _) => (DeviceType::Generic, product_name.to_string()),
         _ => (DeviceType::Unknown, String::from("unknown")),
     })
 }
