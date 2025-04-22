@@ -646,7 +646,8 @@ impl PowerStationTdpLimitManager {
         // Call EnumerateCards method to get all GPU cards
         let cards: Vec<String> = proxy
             .call::<_, _, Vec<String>>("EnumerateCards", &())
-            .await?;
+            .await
+            .inspect_err(|message| error!("Error calling EnumerateCards: {message}"))?;
         debug!("Got {} GPU cards", cards.len());
 
         // Extract card names from paths
@@ -685,7 +686,8 @@ impl PowerStationTdpLimitManager {
             // Get the Class property
             let class = proxy
                 .call::<_, _, OwnedValue>("Get", &(Self::DBUS_GPU_INTERFACE, "Class"))
-                .await?;
+                .await
+                .inspect_err(|message| error!("Error calling Get: {message}"))?;
 
             let class: String = class.try_into()?;
 
@@ -721,7 +723,8 @@ impl PowerStationTdpLimitManager {
 
         let value = proxy
             .call::<_, _, OwnedValue>("Get", &(interface, property))
-            .await?;
+            .await
+            .inspect_err(|message| error!("Error calling Get: {message}"))?;
 
         let result: String = value.try_into()?;
         Ok(result.into())
@@ -756,7 +759,8 @@ impl TdpLimitManager for PowerStationTdpLimitManager {
         // Get the TDP property
         let tdp_value = proxy
             .call::<_, _, OwnedValue>("Get", &(Self::DBUS_TDP_INTERFACE, "TDP"))
-            .await?;
+            .await
+            .inspect_err(|message| error!("Error calling Get: {message}"))?;
 
         // PowerStation returns TDP as a double, convert to u32
         let tdp_value: f64 = tdp_value.try_into()?;
@@ -805,7 +809,8 @@ impl TdpLimitManager for PowerStationTdpLimitManager {
                     zbus::zvariant::Value::from(limit as f64),
                 ),
             )
-            .await?;
+            .await
+            .inspect_err(|message| error!("Error calling Set: {message}"))?;
 
         Ok(())
     }
