@@ -17,7 +17,7 @@ use std::sync::Mutex;
 use strum::{Display, EnumString, VariantNames};
 use tokio::fs::{self, try_exists, File};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tracing::{error, warn};
+use tracing::{debug, error, warn};
 use zbus::zvariant::{ObjectPath, OwnedValue};
 use zbus::Connection;
 
@@ -482,6 +482,7 @@ impl LenovoWmiTdpLimitManager {
 #[async_trait]
 impl TdpLimitManager for LenovoWmiTdpLimitManager {
     async fn get_tdp_limit(&self) -> Result<u32> {
+        debug!("Getting Lenovo WMI TDP limit");
         let config = platform_config().await?;
         if let Some(config) = config
             .as_ref()
@@ -503,6 +504,7 @@ impl TdpLimitManager for LenovoWmiTdpLimitManager {
     }
 
     async fn set_tdp_limit(&self, limit: u32) -> Result<()> {
+        debug!("Setting Lenovo WMI TDP limit to {limit}");
         ensure!(
             self.get_tdp_limit_range().await?.contains(&limit),
             "Invalid limit"
@@ -545,6 +547,7 @@ impl TdpLimitManager for LenovoWmiTdpLimitManager {
             .trim()
             .parse()
             .map_err(|e| anyhow!("Error parsing value: {e}"))?;
+        debug!("Lenovo WMI TDP limit range: {min}..={max}");
         Ok(min..=max)
     }
 
@@ -568,8 +571,6 @@ impl PowerStationTdpLimitManager {
     const DBUS_CARD_PREFIX: &str = "Card";
     const DBUS_GPU_INTERFACE: &str = "org.shadowblip.GPU.Card";
     const DBUS_TDP_INTERFACE: &str = "org.shadowblip.GPU.Card.TDP";
-    const DEFAULT_MIN_TDP: u32 = 3;
-    const DEFAULT_MAX_TDP: u32 = 35;
 
     // Creates a new PowerStationTdpLimitManager instance
     async fn new() -> Result<Self> {
@@ -724,6 +725,7 @@ impl PowerStationTdpLimitManager {
 #[async_trait]
 impl TdpLimitManager for PowerStationTdpLimitManager {
     async fn get_tdp_limit(&self) -> Result<u32> {
+        debug!("Getting PowerStation TDP limit");
         // Connect to system DBus
         let connection = Connection::system().await?;
 
@@ -753,6 +755,7 @@ impl TdpLimitManager for PowerStationTdpLimitManager {
     }
 
     async fn set_tdp_limit(&self, limit: u32) -> Result<()> {
+        debug!("Setting PowerStation TDP limit to {limit}");
         // Check if limit is within range
         let range = self.get_tdp_limit_range().await?;
         ensure!(
