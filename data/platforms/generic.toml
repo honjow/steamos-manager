@@ -1,0 +1,6 @@
+[tdp_limit]
+method = "power_station"
+
+[tdp_limit.range]
+min = 3
+max = 35
