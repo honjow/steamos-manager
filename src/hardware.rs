@@ -37,6 +37,7 @@ pub(crate) enum DeviceType {
     Unknown,
     SteamDeck,
     LegionGoS,
+    Generic,
 }
 
 #[derive(Display, EnumString, PartialEq, Debug, Copy, Clone, TryFromPrimitive)]
