@@ -568,7 +568,7 @@ impl PowerStationTdpLimitManager {
     // PowerStation DBus service information
     const DBUS_SERVICE_NAME: &str = "org.shadowblip.PowerStation";
     const DBUS_BASE_PATH: &str = "/org/shadowblip/Performance/GPU";
-    const DBUS_CARD_PREFIX: &str = "Card";
+    const DBUS_CARD_PREFIX: &str = "card";
     const DBUS_GPU_INTERFACE: &str = "org.shadowblip.GPU.Card";
     const DBUS_TDP_INTERFACE: &str = "org.shadowblip.GPU.Card.TDP";
 
@@ -644,7 +644,9 @@ impl PowerStationTdpLimitManager {
         .await?;
         debug!("Got GPU proxy");
         // Call EnumerateCards method to get all GPU cards
-        let cards: Vec<String> = proxy.call("EnumerateCards", &()).await?;
+        let cards: Vec<String> = proxy
+            .call::<_, _, Vec<String>>("EnumerateCards", &())
+            .await?;
         debug!("Got {} GPU cards", cards.len());
 
         // Extract card names from paths
