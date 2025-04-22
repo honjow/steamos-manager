@@ -75,12 +75,13 @@ pub(crate) async fn device_type() -> Result<DeviceType> {
 
 pub(crate) async fn device_variant() -> Result<(DeviceType, String)> {
     let sys_vendor = fs::read_to_string(path(SYS_VENDOR_PATH)).await?;
+    let sys_vendor = sys_vendor.trim_end();
     let product_name = fs::read_to_string(path(PRODUCT_NAME_PATH)).await?;
     let product_name = product_name.trim_end();
     let board_name = fs::read_to_string(path(BOARD_NAME_PATH)).await?;
     let board_name = board_name.trim_end();
-    debug!("Device variant: {sys_vendor} {product_name} {board_name}");
-    Ok(match (sys_vendor.trim_end(), product_name, board_name) {
+    debug!("Device variant: sys_vendor=[{sys_vendor}] product_name=[{product_name}] board_name=[{board_name}]");
+    Ok(match (sys_vendor, product_name, board_name) {
         ("LENOVO", "83L3" | "83N6" | "83Q2" | "83Q3", _) => {
             (DeviceType::LegionGoS, product_name.to_string())
         }
