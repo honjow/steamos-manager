@@ -83,7 +83,7 @@ pub(crate) async fn device_variant() -> Result<(DeviceType, String)> {
             (DeviceType::LegionGoS, product_name.to_string())
         }
         ("Valve", _, "Jupiter" | "Galileo") => (DeviceType::SteamDeck, board_name.to_string()),
-        _ => (DeviceType::Unknown, String::from("unknown")),
+        _ => (DeviceType::Generic, String::from("generic")),
     })
 }
 
