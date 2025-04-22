@@ -18,7 +18,7 @@ use strum::{Display, EnumString, VariantNames};
 use tokio::fs::{self, try_exists, File};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tracing::{debug, error, warn};
-use zbus::zvariant::{ObjectPath, OwnedValue};
+use zbus::zvariant::{ObjectPath, OwnedObjectPath, OwnedValue};
 use zbus::Connection;
 
 use crate::hardware::{device_type, DeviceType};
@@ -644,8 +644,8 @@ impl PowerStationTdpLimitManager {
         .await?;
         debug!("Got GPU proxy");
         // Call EnumerateCards method to get all GPU cards
-        let cards: Vec<String> = proxy
-            .call::<_, _, Vec<String>>("EnumerateCards", &())
+        let cards: Vec<OwnedObjectPath> = proxy
+            .call::<_, _, Vec<OwnedObjectPath>>("EnumerateCards", &())
             .await
             .inspect_err(|message| error!("Error calling EnumerateCards: {message}"))?;
         debug!("Got {} GPU cards", cards.len());
@@ -654,7 +654,9 @@ impl PowerStationTdpLimitManager {
         let cards: Vec<String> = cards
             .into_iter()
             .filter_map(|path| {
-                path.split('/')
+                let path_str = path.to_string();
+                path_str
+                    .split('/')
                     .last()
                     .filter(|s| s.starts_with(Self::DBUS_CARD_PREFIX))
                     .map(String::from)
