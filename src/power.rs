@@ -795,9 +795,16 @@ impl TdpLimitManager for PowerStationTdpLimitManager {
 
     // Implementation of the required get_tdp_limit_range method
     async fn get_tdp_limit_range(&self) -> Result<RangeInclusive<u32>> {
-        // This is a placeholder implementation using default values
-        // The actual implementation needs to be determined separately
-        Ok(Self::DEFAULT_MIN_TDP..=Self::DEFAULT_MAX_TDP)
+        let config = platform_config().await?;
+        let config = config
+            .as_ref()
+            .and_then(|config| config.tdp_limit.as_ref())
+            .ok_or(anyhow!("No TDP limit configured"))?;
+
+        if let Some(range) = config.range {
+            return Ok(range.min..=range.max);
+        }
+        bail!("No TDP limit range configured");
     }
 
     async fn is_active(&self) -> Result<bool> {
