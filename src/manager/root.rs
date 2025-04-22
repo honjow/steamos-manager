@@ -12,7 +12,7 @@ use std::ffi::OsStr;
 use tokio::fs::File;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 use zbus::object_server::SignalEmitter;
 use zbus::zvariant::{self, Fd};
 use zbus::{fdo, interface, Connection};
@@ -296,6 +296,7 @@ impl SteamOSManager {
     }
 
     async fn set_manual_gpu_clock(&self, clocks: u32) -> fdo::Result<()> {
+        debug!("Setting manual GPU clock to {clocks}");
         set_gpu_clocks(clocks)
             .await
             .inspect_err(|message| error!("Error setting manual GPU clock: {message}"))
@@ -303,6 +304,7 @@ impl SteamOSManager {
     }
 
     async fn set_tdp_limit(&self, limit: u32) -> fdo::Result<()> {
+        debug!("Setting TDP limit to {limit}");
         let Some(ref manager) = self.tdp_limit_manager else {
             return Err(fdo::Error::Failed(String::from(
                 "TDP limiting not configured",

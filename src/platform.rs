@@ -15,6 +15,10 @@ use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 use strum::VariantNames;
 use tokio::fs::{metadata, read_to_string};
+
+#[cfg(not(test))]
+use tracing::debug;
+
 #[cfg(not(test))]
 use tokio::sync::OnceCell;
 use tokio::task::spawn_blocking;
@@ -164,6 +168,7 @@ impl PlatformConfig {
             "/usr/share/steamos-manager/platforms/{platform}.toml"
         ))
         .await?;
+        debug!("Loaded platform config: {config}");
         Ok(Some(toml::from_str(config.as_ref())?))
     }
 
