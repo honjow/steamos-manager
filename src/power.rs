@@ -593,12 +593,14 @@ impl PowerStationTdpLimitManager {
 
         // Check if PowerStation service is available
         if !self.check_dbus_service(&connection).await? {
+            error!("PowerStation DBus service is not running");
             bail!("PowerStation DBus service is not running");
         }
 
         // Query available GPU cards
         let cards = self.query_gpu_cards(&connection).await?;
         if cards.is_empty() {
+            error!("No GPU cards found in PowerStation");
             bail!("No GPU cards found in PowerStation");
         }
 
@@ -770,6 +772,7 @@ impl TdpLimitManager for PowerStationTdpLimitManager {
 
         // Find the GPU card path
         let card_path = self.find_gpu_card_path().await?;
+        debug!("Setting PowerStation TDP limit to {limit} on {card_path}");
 
         // Get a proxy to set the TDP property
         let path = ObjectPath::try_from(card_path.as_str())?;
