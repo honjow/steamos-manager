@@ -766,13 +766,15 @@ impl TdpLimitManager for PowerStationTdpLimitManager {
             limit,
             range
         );
+        debug!("TDP limit is within range");
 
         // Connect to system DBus
         let connection = Connection::system().await?;
+        debug!("Connected to system DBus");
 
         // Find the GPU card path
         let card_path = self.find_gpu_card_path().await?;
-        debug!("Setting PowerStation TDP limit to {limit} on {card_path}");
+        debug!("Found GPU card path: {card_path}");
 
         // Get a proxy to set the TDP property
         let path = ObjectPath::try_from(card_path.as_str())?;
