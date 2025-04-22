@@ -587,15 +587,18 @@ impl PowerStationTdpLimitManager {
         if let Some(path) = self.gpu_card_path.lock().unwrap().clone() {
             return Ok(path);
         }
+        debug!("No cached GPU card path found, performing lookup");
 
         // Connect to the system DBus
         let connection = Connection::system().await?;
+        debug!("Connected to system DBus");
 
         // Check if PowerStation service is available
         if !self.check_dbus_service(&connection).await? {
             error!("PowerStation DBus service is not running");
             bail!("PowerStation DBus service is not running");
         }
+        debug!("PowerStation DBus service is running");
 
         // Query available GPU cards
         let cards = self.query_gpu_cards(&connection).await?;
@@ -603,9 +606,11 @@ impl PowerStationTdpLimitManager {
             error!("No GPU cards found in PowerStation");
             bail!("No GPU cards found in PowerStation");
         }
+        debug!("Found {} GPU cards in PowerStation", cards.len());
 
         // Select the appropriate card (prefer discrete GPU if available)
         let path = self.select_appropriate_card(&connection, cards).await?;
+        debug!("Selected GPU card path: {path}");
 
         // Cache the path for future use
         *self.gpu_card_path.lock().unwrap() = Some(path.clone());
@@ -625,6 +630,7 @@ impl PowerStationTdpLimitManager {
 
     // Query all available GPU cards from PowerStation
     async fn query_gpu_cards(&self, connection: &zbus::Connection) -> Result<Vec<String>> {
+        debug!("Querying GPU cards from PowerStation");
         let gpu_path = format!("{}", Self::DBUS_BASE_PATH);
 
         // Get a proxy to the GPU interface
@@ -636,9 +642,10 @@ impl PowerStationTdpLimitManager {
             "org.shadowblip.GPU",
         )
         .await?;
-
+        debug!("Got GPU proxy");
         // Call EnumerateCards method to get all GPU cards
         let cards: Vec<String> = proxy.call("EnumerateCards", &()).await?;
+        debug!("Got {} GPU cards", cards.len());
 
         // Extract card names from paths
         let cards: Vec<String> = cards
