@@ -343,7 +343,9 @@ pub(crate) async fn get_gpu_clocks_range() -> Result<RangeInclusive<u32>> {
 pub(crate) async fn set_gpu_clocks(clocks: u32) -> Result<()> {
     // Set GPU clocks to given value valid
     // Only used when GPU Performance Level is manual, but write whenever called.
-    let base = find_hwmon(GPU_HWMON_NAME).await?;
+    let base = find_hwmon(GPU_HWMON_NAME)
+        .await
+        .inspect_err(|message| error!("Error finding hwmon: {message}"))?;
     let mut myfile = File::create(base.join(GPU_CLOCKS_SUFFIX))
         .await
         .inspect_err(|message| error!("Error opening sysfs file for writing: {message}"))?;
