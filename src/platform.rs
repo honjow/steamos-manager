@@ -158,6 +158,7 @@ impl PlatformConfig {
             DeviceType::SteamDeck => "jupiter",
             DeviceType::LegionGoS => "legion-go-s",
             DeviceType::Ally => "ally",
+            DeviceType::Generic => "generic",
             _ => return Ok(None),
         };
         let config = read_to_string(format!(

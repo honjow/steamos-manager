@@ -13,10 +13,13 @@ use regex::Regex;
 use std::ops::RangeInclusive;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::Mutex;
 use strum::{Display, EnumString, VariantNames};
 use tokio::fs::{self, try_exists, File};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tracing::{error, warn};
+use tracing::{debug, error, warn};
+use zbus::zvariant::{ObjectPath, OwnedObjectPath, OwnedValue};
+use zbus::Connection;
 
 use crate::hardware::{device_type, DeviceType};
 use crate::platform::platform_config;
@@ -95,6 +98,7 @@ pub enum TdpLimitingMethod {
     GpuHwmon,
     AsusArmoury,
     LenovoWmi,
+    PowerStation,
 }
 
 #[derive(Debug)]
@@ -105,6 +109,12 @@ pub(crate) struct LenovoWmiTdpLimitManager {}
 
 #[derive(Debug)]
 pub(crate) struct AsusArmouryTdpLimitManager {}
+
+#[derive(Debug)]
+pub(crate) struct PowerStationTdpLimitManager {
+    // Path to the detected GPU card, cached to avoid repeated lookups
+    gpu_card_path: Mutex<Option<String>>,
+}
 
 #[async_trait]
 pub(crate) trait TdpLimitManager: Send + Sync {
@@ -127,6 +137,9 @@ pub(crate) async fn tdp_limit_manager() -> Result<Box<dyn TdpLimitManager>> {
         TdpLimitingMethod::LenovoWmi => Box::new(LenovoWmiTdpLimitManager {}),
         TdpLimitingMethod::AsusArmoury => Box::new(AsusArmouryTdpLimitManager {}),
         TdpLimitingMethod::GpuHwmon => Box::new(GpuHwmonTdpLimitManager {}),
+        TdpLimitingMethod::PowerStation => Box::new(PowerStationTdpLimitManager {
+            gpu_card_path: Mutex::new(None),
+        }),
     })
 }
 
@@ -616,6 +629,271 @@ impl TdpLimitManager for AsusArmouryTdpLimitManager {
             .parse()
             .map_err(|e| anyhow!("Error parsing value: {e}"))?;
         Ok(min..=max)
+    }
+}
+
+impl PowerStationTdpLimitManager {
+    // PowerStation DBus service information
+    const DBUS_SERVICE_NAME: &str = "org.shadowblip.PowerStation";
+    const DBUS_BASE_PATH: &str = "/org/shadowblip/Performance/GPU";
+    const DBUS_CARD_PREFIX: &str = "card";
+    const DBUS_GPU_INTERFACE: &str = "org.shadowblip.GPU.Card";
+    const DBUS_TDP_INTERFACE: &str = "org.shadowblip.GPU.Card.TDP";
+
+    // Find appropriate GPU card path from PowerStation DBus service
+    // Uses cached path if available, otherwise performs lookup
+    async fn find_gpu_card_path(&self) -> Result<String> {
+        // Check if we have a cached path
+        if let Some(path) = self.gpu_card_path.lock().unwrap().clone() {
+            return Ok(path);
+        }
+
+        // Connect to the system DBus
+        let connection = Connection::system().await?;
+
+        // Check if PowerStation service is available
+        if !self.check_dbus_service(&connection).await? {
+            bail!("PowerStation DBus service is not running");
+        }
+
+        // Query available GPU cards
+        let cards = self.query_gpu_cards(&connection).await?;
+        if cards.is_empty() {
+            bail!("No GPU cards found in PowerStation");
+        }
+
+        // Select the appropriate card (prefer discrete GPU if available)
+        let path = self.select_appropriate_card(&connection, cards).await?;
+
+        // Cache the path for future use
+        *self.gpu_card_path.lock().unwrap() = Some(path.clone());
+
+        Ok(path)
+    }
+
+    // Check if PowerStation DBus service is running
+    async fn check_dbus_service(&self, connection: &zbus::Connection) -> Result<bool> {
+        use zbus::fdo;
+        let proxy = fdo::DBusProxy::new(&connection).await?;
+        let names = proxy.list_names().await?;
+        Ok(names
+            .iter()
+            .any(|name| name.as_str() == Self::DBUS_SERVICE_NAME))
+    }
+
+    // Query all available GPU cards from PowerStation
+    async fn query_gpu_cards(&self, connection: &zbus::Connection) -> Result<Vec<String>> {
+        let gpu_path = format!("{}", Self::DBUS_BASE_PATH);
+
+        // Get a proxy to the GPU interface
+        let path = ObjectPath::try_from(gpu_path.as_str())?;
+        let proxy = zbus::Proxy::new(
+            connection,
+            Self::DBUS_SERVICE_NAME,
+            path,
+            "org.shadowblip.GPU",
+        )
+        .await?;
+
+        // Call EnumerateCards method to get all GPU cards
+        let cards: Vec<OwnedObjectPath> = proxy
+            .call::<_, _, Vec<OwnedObjectPath>>("EnumerateCards", &())
+            .await
+            .inspect_err(|message| error!("Error calling EnumerateCards: {message}"))?;
+
+        // Extract card names from paths
+        let cards: Vec<String> = cards
+            .into_iter()
+            .filter_map(|path| {
+                let path_str = path.to_string();
+                path_str
+                    .split('/')
+                    .last()
+                    .filter(|s| s.starts_with(Self::DBUS_CARD_PREFIX))
+                    .map(String::from)
+            })
+            .collect();
+
+        Ok(cards)
+    }
+
+    // Select the appropriate GPU card, preferring discrete GPU over integrated
+    async fn select_appropriate_card(
+        &self,
+        connection: &zbus::Connection,
+        cards: Vec<String>,
+    ) -> Result<String> {
+        for card in &cards {
+            let card_path = format!("{}/{}", Self::DBUS_BASE_PATH, card);
+
+            // Get a proxy to the Properties interface
+            let path = ObjectPath::try_from(card_path.as_str())?;
+            let proxy = zbus::Proxy::new(
+                connection,
+                Self::DBUS_SERVICE_NAME,
+                path,
+                "org.freedesktop.DBus.Properties",
+            )
+            .await?;
+
+            // Get the Class property
+            let class = proxy
+                .call::<_, _, OwnedValue>("Get", &(Self::DBUS_GPU_INTERFACE, "Class"))
+                .await
+                .inspect_err(|message| error!("Error calling Get: {message}"))?;
+
+            let class: String = class.try_into()?;
+
+            // If we find a discrete GPU, use it
+            if class == "discrete" {
+                return Ok(card_path);
+            }
+        }
+
+        // If no discrete GPU found, use the first card
+        if let Some(card) = cards.first() {
+            return Ok(format!("{}/{}", Self::DBUS_BASE_PATH, card));
+        }
+
+        bail!("No suitable GPU card found")
+    }
+
+    // Set the TDP boost property
+    async fn set_tdp_boost(&self, boost: u32) -> Result<()> {
+        debug!("Setting PowerStation TDP boost to {boost}");
+
+        // Connect to system DBus
+        let connection = Connection::system().await?;
+
+        // Find the GPU card path
+        let card_path = self.find_gpu_card_path().await?;
+
+        // Get a proxy to set the TDP boost property
+        let path = ObjectPath::try_from(card_path.as_str())?;
+        let proxy = zbus::Proxy::new(
+            &connection,
+            Self::DBUS_SERVICE_NAME,
+            path,
+            "org.freedesktop.DBus.Properties",
+        )
+        .await
+        .inspect_err(|message| error!("Error creating proxy: {message}"))?;
+
+        // Set the TDP boost property (convert u32 to double)
+        proxy
+            .call::<_, _, ()>(
+                "Set",
+                &(
+                    Self::DBUS_TDP_INTERFACE,
+                    "Boost",
+                    zbus::zvariant::Value::from(boost as f64),
+                ),
+            )
+            .await
+            .inspect_err(|message| error!("Error calling Set: {message}"))?;
+
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl TdpLimitManager for PowerStationTdpLimitManager {
+    async fn get_tdp_limit(&self) -> Result<u32> {
+        debug!("Getting PowerStation TDP limit");
+        // Connect to system DBus
+        let connection = Connection::system().await?;
+
+        // Find the GPU card path
+        let card_path = self.find_gpu_card_path().await?;
+
+        // Get a proxy to query TDP property
+        let path = ObjectPath::try_from(card_path.as_str())?;
+        let proxy = zbus::Proxy::new(
+            &connection,
+            Self::DBUS_SERVICE_NAME,
+            path,
+            "org.freedesktop.DBus.Properties",
+        )
+        .await?;
+
+        // Get the TDP property
+        let tdp_value = proxy
+            .call::<_, _, OwnedValue>("Get", &(Self::DBUS_TDP_INTERFACE, "TDP"))
+            .await
+            .inspect_err(|message| error!("Error calling Get: {message}"))?;
+
+        // PowerStation returns TDP as a double, convert to u32
+        let tdp_value: f64 = tdp_value.try_into()?;
+
+        // Round to nearest integer
+        Ok(tdp_value.round() as u32)
+    }
+
+    async fn set_tdp_limit(&self, limit: u32) -> Result<()> {
+        debug!("Setting PowerStation TDP limit to {limit}");
+        // Check if limit is within range
+        let range = self.get_tdp_limit_range().await?;
+        ensure!(
+            range.contains(&limit),
+            "TDP limit {} is outside allowed range {:?}",
+            limit,
+            range
+        );
+
+        // Set the TDP boost to the limit
+        self.set_tdp_boost(0).await.map_err(|e| anyhow!("Error setting TDP boost: {e}"))?;
+
+        // Connect to system DBus
+        let connection = Connection::system().await?;
+
+        // Find the GPU card path
+        let card_path = self.find_gpu_card_path().await?;
+
+        // Get a proxy to set the TDP property
+        let path = ObjectPath::try_from(card_path.as_str())?;
+        let proxy = zbus::Proxy::new(
+            &connection,
+            Self::DBUS_SERVICE_NAME,
+            path,
+            "org.freedesktop.DBus.Properties",
+        )
+        .await
+        .inspect_err(|message| error!("Error creating proxy: {message}"))?;
+
+        // Set the TDP property (convert u32 to double)
+        proxy
+            .call::<_, _, ()>(
+                "Set",
+                &(
+                    Self::DBUS_TDP_INTERFACE,
+                    "TDP",
+                    zbus::zvariant::Value::from(limit as f64),
+                ),
+            )
+            .await
+            .inspect_err(|message| error!("Error calling Set: {message}"))?;
+
+        Ok(())
+    }
+
+    // Implementation of the required get_tdp_limit_range method
+    async fn get_tdp_limit_range(&self) -> Result<RangeInclusive<u32>> {
+        let config = platform_config().await?;
+        let config = config
+            .as_ref()
+            .and_then(|config| config.tdp_limit.as_ref())
+            .ok_or(anyhow!("No TDP limit configured"))?;
+
+        if let Some(range) = config.range {
+            return Ok(range.min..=range.max);
+        }
+        bail!("No TDP limit range configured");
+    }
+
+    async fn is_active(&self) -> Result<bool> {
+        // Only check if PowerStation DBus service is running
+        let connection = Connection::system().await?;
+        self.check_dbus_service(&connection).await
     }
 }
 
