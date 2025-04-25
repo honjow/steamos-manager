@@ -794,19 +794,19 @@ impl PowerStationTdpLimitManager {
 
         Ok(())
     }
-}
 
-#[async_trait]
-impl TdpLimitManager for PowerStationTdpLimitManager {
-    async fn get_tdp_limit(&self) -> Result<u32> {
-        debug!("Getting PowerStation TDP limit");
+    // Helper method to get property values from D-Bus
+    async fn get_tdp_property_value(&self, property_name: &str, interface: &str) -> Result<f64> {
         // Connect to system DBus
         let connection = Connection::system().await?;
 
         // Find the GPU card path
-        let card_path = self.find_gpu_card_path().await?;
+        let card_path = self
+            .find_gpu_card_path()
+            .await
+            .inspect_err(|message| error!("Error finding GPU card path: {message}"))?;
 
-        // Get a proxy to query TDP property
+        // Get a proxy to query property
         let path = ObjectPath::try_from(card_path.as_str())?;
         let proxy = zbus::Proxy::new(
             &connection,
@@ -814,18 +814,49 @@ impl TdpLimitManager for PowerStationTdpLimitManager {
             path,
             "org.freedesktop.DBus.Properties",
         )
-        .await?;
+        .await
+        .inspect_err(|message| error!("Error creating proxy: {message}"))?;
 
-        // Get the TDP property
-        let tdp_value = proxy
-            .call::<_, _, OwnedValue>("Get", &(Self::DBUS_TDP_INTERFACE, "TDP"))
+        // Get the property
+        let value = proxy
+            .call::<_, _, OwnedValue>("Get", &(interface, property_name))
             .await
-            .inspect_err(|message| error!("Error calling Get: {message}"))?;
+            .inspect_err(|message| error!("Error calling Get for {property_name}: {message}"))?;
 
-        // PowerStation returns TDP as a double, convert to u32
-        let tdp_value: f64 = tdp_value.try_into()?;
+        // Convert to f64
+        let value: f64 = value.try_into()?;
+        Ok(value)
+    }
 
-        // Round to nearest integer
+    async fn get_min_tdp(&self) -> Result<u32> {
+        let min_tdp = self
+            .get_tdp_property_value("MinTDP", Self::DBUS_TDP_INTERFACE)
+            .await?;
+        Ok(min_tdp.round() as u32)
+    }
+
+    async fn get_max_tdp(&self) -> Result<u32> {
+        let max_tdp = self
+            .get_tdp_property_value("MaxTDP", Self::DBUS_TDP_INTERFACE)
+            .await?;
+        Ok(max_tdp.round() as u32)
+    }
+
+    async fn get_max_boost(&self) -> Result<u32> {
+        let max_boost = self
+            .get_tdp_property_value("MaxBoost", Self::DBUS_TDP_INTERFACE)
+            .await?;
+        Ok(max_boost.round() as u32)
+    }
+}
+
+#[async_trait]
+impl TdpLimitManager for PowerStationTdpLimitManager {
+    async fn get_tdp_limit(&self) -> Result<u32> {
+        debug!("Getting PowerStation TDP limit");
+        let tdp_value = self
+            .get_tdp_property_value("TDP", Self::DBUS_TDP_INTERFACE)
+            .await?;
         Ok(tdp_value.round() as u32)
     }
 
@@ -841,7 +872,9 @@ impl TdpLimitManager for PowerStationTdpLimitManager {
         );
 
         // Set the TDP boost to the limit
-        self.set_tdp_boost(0).await.map_err(|e| anyhow!("Error setting TDP boost: {e}"))?;
+        self.set_tdp_boost(0)
+            .await
+            .map_err(|e| anyhow!("Error setting TDP boost: {e}"))?;
 
         // Connect to system DBus
         let connection = Connection::system().await?;
@@ -878,16 +911,15 @@ impl TdpLimitManager for PowerStationTdpLimitManager {
 
     // Implementation of the required get_tdp_limit_range method
     async fn get_tdp_limit_range(&self) -> Result<RangeInclusive<u32>> {
-        let config = platform_config().await?;
-        let config = config
-            .as_ref()
-            .and_then(|config| config.tdp_limit.as_ref())
-            .ok_or(anyhow!("No TDP limit configured"))?;
-
-        if let Some(range) = config.range {
-            return Ok(range.min..=range.max);
-        }
-        bail!("No TDP limit range configured");
+        let min_tdp = self
+            .get_min_tdp()
+            .await
+            .map_err(|e| anyhow!("Error getting min TDP: {e}"))?;
+        let max_tdp = self
+            .get_max_tdp()
+            .await
+            .map_err(|e| anyhow!("Error getting max TDP: {e}"))?;
+        Ok(min_tdp..=max_tdp)
     }
 
     async fn is_active(&self) -> Result<bool> {
