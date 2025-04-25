@@ -1,0 +1,6 @@
+[performance_profile]
+platform_profile_name = "asus-wmi"
+suggested_default = "balanced"
+
+[tdp_limit]
+method = "asus_armoury"

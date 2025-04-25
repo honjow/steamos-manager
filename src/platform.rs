@@ -157,6 +157,7 @@ impl PlatformConfig {
         let platform = match device_type().await? {
             DeviceType::SteamDeck => "jupiter",
             DeviceType::LegionGoS => "legion-go-s",
+            DeviceType::Ally => "ally",
             _ => return Ok(None),
         };
         let config = read_to_string(format!(
