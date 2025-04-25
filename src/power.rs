@@ -555,11 +555,14 @@ async fn is_gpu_enabled(card_path: impl AsRef<Path>) -> bool {
 
 // Factory function to get the appropriate GPU controller
 async fn get_gpu_controller() -> Result<Box<dyn GpuClockController>> {
+    debug!("Looking for GPU controller");
     // First try AMD GPU via HWMON
     if let Ok(path) = find_hwmon(GPU_HWMON_NAME).await {
         debug!("Found AMD GPU via HWMON");
         return Ok(Box::new(AmdGpuController { hwmon_path: path }));
     }
+
+    debug!("No AMD GPU found, trying Intel GPUs");
 
     // If no AMD GPU, try Intel GPUs
     for card_num in 0..4 {
@@ -568,6 +571,7 @@ async fn get_gpu_controller() -> Result<Box<dyn GpuClockController>> {
 
         // Skip if path doesn't exist
         if !path_exists(&card_path).await {
+            debug!("Skipping non-existent GPU at {}", card_path.display());
             continue;
         }
 
@@ -577,17 +581,23 @@ async fn get_gpu_controller() -> Result<Box<dyn GpuClockController>> {
             continue;
         }
 
+        debug!("Checking Intel i915 GPU at {}", card_path.display());
+
         // Check for Intel i915
         if path_exists(card_path.join("gt_min_freq_mhz")).await {
             debug!("Found Intel i915 GPU at {}", card_path.display());
             return Ok(Box::new(IntelI915Controller { path: card_path }));
         }
 
+        debug!("No Intel i915 GPU found, trying Intel Xe");
+
         // Check for Intel Xe
         if path_exists(card_path.join("device/tile0/gt0/freq0/min_freq")).await {
             debug!("Found Intel Xe GPU at {}", card_path.display());
             return Ok(Box::new(IntelXeController { path: card_path }));
         }
+
+        debug!("No Intel Xe GPU found");
     }
 
     bail!("No supported GPU found")
