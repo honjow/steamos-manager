@@ -790,7 +790,7 @@ impl PowerStationTdpLimitManager {
                 ),
             )
             .await
-            .inspect_err(|message| error!("Error calling Set: {message}"))?;
+            .inspect_err(|message| error!("Error calling Set Boost: {message}"))?;
 
         Ok(())
     }
@@ -872,9 +872,10 @@ impl TdpLimitManager for PowerStationTdpLimitManager {
         );
 
         // Set the TDP boost to the limit
-        self.set_tdp_boost(0)
+        let _ = self
+            .set_tdp_boost(0)
             .await
-            .map_err(|e| anyhow!("Error setting TDP boost: {e}"))?;
+            .inspect_err(|e| error!("Error setting TDP boost before setting TDP: {e}"));
 
         // Connect to system DBus
         let connection = Connection::system().await?;
