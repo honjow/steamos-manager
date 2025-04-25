@@ -36,6 +36,7 @@ pub(crate) enum DeviceType {
     #[default]
     Unknown,
     SteamDeck,
+    Ally,
     LegionGo,
     LegionGoS,
     ZotacZone,
@@ -83,6 +84,9 @@ pub(crate) async fn device_variant() -> Result<(DeviceType, String)> {
         ("LENOVO", "83E1", _) => (DeviceType::LegionGo, product_name.to_string()),
         ("LENOVO", "83L3" | "83N6" | "83Q2" | "83Q3", _) => {
             (DeviceType::LegionGoS, product_name.to_string())
+        }
+        ("ASUSTeK COMPUTER INC.", "ROG Ally RC71L_RC71L" | "ROG Ally X RC72LA_RC72LA", _) => {
+            (DeviceType::Ally, product_name.to_string())
         }
         ("ZOTAC", _, "G0A1W" | "G1A1W") => (DeviceType::ZotacZone, board_name.to_string()),
         ("Valve", _, "Jupiter" | "Galileo") => (DeviceType::SteamDeck, board_name.to_string()),
@@ -272,6 +276,48 @@ pub mod test {
         assert_eq!(
             device_variant().await.unwrap(),
             (DeviceType::LegionGoS, String::from("83Q3"))
+        );
+
+        write(crate::path(SYS_VENDOR_PATH), "ASUSTeK COMPUTER INC.\n")
+            .await
+            .expect("write");
+        write(crate::path(BOARD_NAME_PATH), "INVALID\n")
+            .await
+            .expect("write");
+        write(crate::path(PRODUCT_NAME_PATH), "INVALID\n")
+            .await
+            .expect("write");
+        assert_eq!(
+            steam_deck_variant().await.unwrap(),
+            SteamDeckVariant::Unknown
+        );
+        assert_eq!(
+            device_variant().await.unwrap(),
+            (DeviceType::Unknown, String::from("unknown"))
+        );
+
+        write(crate::path(PRODUCT_NAME_PATH), "ROG Ally RC71L_RC71L\n")
+            .await
+            .expect("write");
+        assert_eq!(
+            steam_deck_variant().await.unwrap(),
+            SteamDeckVariant::Unknown
+        );
+        assert_eq!(
+            device_variant().await.unwrap(),
+            (DeviceType::Ally, String::from("ROG Ally RC71L_RC71L"))
+        );
+
+        write(crate::path(PRODUCT_NAME_PATH), "ROG Ally X RC72LA_RC72LA\n")
+            .await
+            .expect("write");
+        assert_eq!(
+            steam_deck_variant().await.unwrap(),
+            SteamDeckVariant::Unknown
+        );
+        assert_eq!(
+            device_variant().await.unwrap(),
+            (DeviceType::Ally, String::from("ROG Ally X RC72LA_RC72LA"))
         );
 
         write(crate::path(SYS_VENDOR_PATH), "ZOTAC\n")
