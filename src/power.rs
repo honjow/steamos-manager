@@ -830,14 +830,14 @@ impl PowerStationTdpLimitManager {
 
     async fn get_min_tdp(&self) -> Result<u32> {
         let min_tdp = self
-            .get_tdp_property_value("MinTDP", Self::DBUS_TDP_INTERFACE)
+            .get_tdp_property_value("MinTdp", Self::DBUS_TDP_INTERFACE)
             .await?;
         Ok(min_tdp.round() as u32)
     }
 
     async fn get_max_tdp(&self) -> Result<u32> {
         let max_tdp = self
-            .get_tdp_property_value("MaxTDP", Self::DBUS_TDP_INTERFACE)
+            .get_tdp_property_value("MaxTdp", Self::DBUS_TDP_INTERFACE)
             .await?;
         Ok(max_tdp.round() as u32)
     }
