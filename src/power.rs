@@ -93,6 +93,7 @@ pub enum CPUScalingGovernor {
 #[strum(serialize_all = "snake_case")]
 pub enum TdpLimitingMethod {
     GpuHwmon,
+    AsusArmoury,
     LenovoWmi,
 }
 
@@ -101,6 +102,9 @@ pub(crate) struct GpuHwmonTdpLimitManager {}
 
 #[derive(Debug)]
 pub(crate) struct LenovoWmiTdpLimitManager {}
+
+#[derive(Debug)]
+pub(crate) struct AsusArmouryTdpLimitManager {}
 
 #[async_trait]
 pub(crate) trait TdpLimitManager: Send + Sync {
@@ -121,6 +125,7 @@ pub(crate) async fn tdp_limit_manager() -> Result<Box<dyn TdpLimitManager>> {
 
     Ok(match config.method {
         TdpLimitingMethod::LenovoWmi => Box::new(LenovoWmiTdpLimitManager {}),
+        TdpLimitingMethod::AsusArmoury => Box::new(AsusArmouryTdpLimitManager {}),
         TdpLimitingMethod::GpuHwmon => Box::new(GpuHwmonTdpLimitManager {}),
     })
 }
@@ -545,6 +550,72 @@ impl TdpLimitManager for LenovoWmiTdpLimitManager {
         } else {
             Ok(true)
         }
+    }
+}
+
+impl AsusArmouryTdpLimitManager {
+    const PREFIX: &str = "/sys/class/firmware-attributes/asus-armoury/attributes";
+    const SPL_SUFFIX: &str = "ppt_pl1_spl";
+    const SPPT_SUFFIX: &str = "ppt_pl2_sppt";
+    const FPPT_SUFFIX: &str = "ppt_pl3_fppt";
+}
+
+#[async_trait]
+impl TdpLimitManager for AsusArmouryTdpLimitManager {
+    async fn get_tdp_limit(&self) -> Result<u32> {
+        let base = path(Self::PREFIX);
+
+        fs::read_to_string(base.join(Self::SPL_SUFFIX).join("current_value"))
+            .await
+            .map_err(|message| anyhow!("Error reading sysfs: {message}"))?
+            .trim()
+            .parse()
+            .map_err(|e| anyhow!("Error parsing value: {e}"))
+    }
+
+    async fn set_tdp_limit(&self, limit: u32) -> Result<()> {
+        ensure!(
+            self.get_tdp_limit_range().await?.contains(&limit),
+            "Invalid limit"
+        );
+
+        let limit = limit.to_string();
+        let base = path(Self::PREFIX);
+        write_synced(
+            base.join(Self::SPL_SUFFIX).join("current_value"),
+            limit.as_bytes(),
+        )
+        .await
+        .inspect_err(|message| error!("Error writing to sysfs file: {message}"))?;
+        write_synced(
+            base.join(Self::SPPT_SUFFIX).join("current_value"),
+            limit.as_bytes(),
+        )
+        .await
+        .inspect_err(|message| error!("Error writing to sysfs file: {message}"))?;
+        write_synced(
+            base.join(Self::FPPT_SUFFIX).join("current_value"),
+            limit.as_bytes(),
+        )
+        .await
+        .inspect_err(|message| error!("Error writing to sysfs file: {message}"))
+    }
+    async fn get_tdp_limit_range(&self) -> Result<RangeInclusive<u32>> {
+        let base = path(Self::PREFIX).join(Self::SPL_SUFFIX);
+
+        let min: u32 = fs::read_to_string(base.join("min_value"))
+            .await
+            .map_err(|message| anyhow!("Error reading sysfs: {message}"))?
+            .trim()
+            .parse()
+            .map_err(|e| anyhow!("Error parsing value: {e}"))?;
+        let max: u32 = fs::read_to_string(base.join("max_value"))
+            .await
+            .map_err(|message| anyhow!("Error reading sysfs: {message}"))?
+            .trim()
+            .parse()
+            .map_err(|e| anyhow!("Error parsing value: {e}"))?;
+        Ok(min..=max)
     }
 }
 
