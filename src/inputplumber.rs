@@ -53,7 +53,10 @@ impl DeckService {
     }
 
     async fn check_devices(&self, object_manager: &ObjectManagerProxy<'_>) -> Result<()> {
-        if device_type().await.unwrap_or(DeviceType::Unknown) == DeviceType::LegionGoS {
+        if matches!(
+            device_type().await.unwrap_or(DeviceType::Unknown),
+            DeviceType::LegionGoS | DeviceType::LegionGo | DeviceType::Claw | DeviceType::Ally | DeviceType::ZotacZone
+        ) {
             // There is a bug on the Legion Go S where querying this information
             // messes up the mapping for the `deck-uhid` target device. It's not
             // clear exactly what's causing this, so we just skip on the Legion
@@ -69,6 +72,16 @@ impl DeckService {
     }
 
     async fn make_deck_from_ifaces_added(&self, msg: InterfacesAdded) -> Result<()> {
+        if matches!(
+            device_type().await.unwrap_or(DeviceType::Unknown),
+            DeviceType::LegionGoS | DeviceType::LegionGo | DeviceType::Claw | DeviceType::Ally | DeviceType::ZotacZone
+        ) {
+            // There is a bug on the Legion Go S where querying this information
+            // messes up the mapping for the `deck-uhid` target device. It's not
+            // clear exactly what's causing this, so we just skip on the Legion
+            // Go S since it makes a `deck-uhid` target device by default.
+            return Ok(());
+        }
         let args = msg.args()?;
         if !args
             .interfaces_and_properties
