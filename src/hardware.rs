@@ -37,6 +37,7 @@ pub(crate) enum DeviceType {
     Unknown,
     SteamDeck,
     Ally,
+    Claw,
     LegionGo,
     LegionGoS,
     ZotacZone,
@@ -90,6 +91,9 @@ pub(crate) async fn device_variant() -> Result<(DeviceType, String)> {
         }
         ("ZOTAC", _, "G0A1W" | "G1A1W") => (DeviceType::ZotacZone, board_name.to_string()),
         ("Valve", _, "Jupiter" | "Galileo") => (DeviceType::SteamDeck, board_name.to_string()),
+        ("Micro-Star International Co., Ltd.", "Claw 8 AI+ A2VM" | "Claw 7 AI+ A2VM" | "Claw A1M", _) => {
+            (DeviceType::Claw, product_name.to_string())
+        }
         _ => (DeviceType::Unknown, String::from("unknown")),
     })
 }
@@ -318,6 +322,60 @@ pub mod test {
         assert_eq!(
             device_variant().await.unwrap(),
             (DeviceType::Ally, String::from("ROG Ally X RC72LA_RC72LA"))
+        );
+
+        write(crate::path(SYS_VENDOR_PATH), "Micro-Star International Co., Ltd.\n")
+            .await
+            .expect("write");
+        write(crate::path(BOARD_NAME_PATH), "INVALID\n")
+            .await
+            .expect("write");
+        write(crate::path(PRODUCT_NAME_PATH), "INVALID\n")
+            .await
+            .expect("write");
+        assert_eq!(
+            steam_deck_variant().await.unwrap(),
+            SteamDeckVariant::Unknown
+        );
+        assert_eq!(
+            device_variant().await.unwrap(),
+            (DeviceType::Unknown, String::from("unknown"))
+        );
+
+        write(crate::path(PRODUCT_NAME_PATH), "Claw 8 AI+ A2VM\n")
+            .await
+            .expect("write");
+        assert_eq!(
+            steam_deck_variant().await.unwrap(),
+            SteamDeckVariant::Unknown
+        );
+        assert_eq!(
+            device_variant().await.unwrap(),
+            (DeviceType::Claw, String::from("Claw 8 AI+ A2VM"))
+        );
+
+        write(crate::path(PRODUCT_NAME_PATH), "Claw 7 AI+ A2VM\n")
+            .await
+            .expect("write");
+        assert_eq!(
+            steam_deck_variant().await.unwrap(),
+            SteamDeckVariant::Unknown
+        );
+        assert_eq!(
+            device_variant().await.unwrap(),
+            (DeviceType::Claw, String::from("Claw 7 AI+ A2VM"))
+        );
+
+        write(crate::path(PRODUCT_NAME_PATH), "Claw A1M\n")
+            .await
+            .expect("write");
+        assert_eq!(
+            steam_deck_variant().await.unwrap(),
+            SteamDeckVariant::Unknown
+        );
+        assert_eq!(
+            device_variant().await.unwrap(),
+            (DeviceType::Claw, String::from("Claw A1M"))
         );
 
         write(crate::path(SYS_VENDOR_PATH), "ZOTAC\n")

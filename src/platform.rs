@@ -157,6 +157,7 @@ impl PlatformConfig {
         let platform = match device_type().await? {
             DeviceType::SteamDeck => "jupiter",
             DeviceType::Ally => "ally",
+            DeviceType::Claw => "claw",
             DeviceType::LegionGo => "legion-go",
             DeviceType::LegionGoS => "legion-go-s",
             DeviceType::ZotacZone => "zotac-zone",
