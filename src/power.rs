@@ -802,11 +802,6 @@ impl TdpLimitManager for PowerStationTdpLimitManager {
             range
         );
 
-        // Set the TDP boost to the limit
-        self.set_tdp_boost(0)
-            .await
-            .map_err(|e| anyhow!("Error setting TDP boost: {e}"))?;
-
         // Connect to system DBus
         let connection = Connection::system().await?;
 
