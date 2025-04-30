@@ -159,6 +159,7 @@ impl PlatformConfig {
             DeviceType::LegionGoS => "legion-go-s",
             DeviceType::Ally => "ally",
             DeviceType::Generic => "generic",
+            DeviceType::Claw => "claw",
             _ => return Ok(None),
         };
         let config = read_to_string(format!(

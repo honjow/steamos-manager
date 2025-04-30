@@ -98,6 +98,7 @@ pub enum TdpLimitingMethod {
     GpuHwmon,
     AsusArmoury,
     LenovoWmi,
+    MsiWmi,
     PowerStation,
 }
 
@@ -115,6 +116,9 @@ pub(crate) struct PowerStationTdpLimitManager {
     // Path to the detected GPU card, cached to avoid repeated lookups
     gpu_card_path: Mutex<Option<String>>,
 }
+
+#[derive(Debug)]
+pub(crate) struct MsiWmiTdpLimitManager {}
 
 #[async_trait]
 pub(crate) trait TdpLimitManager: Send + Sync {
@@ -136,6 +140,7 @@ pub(crate) async fn tdp_limit_manager() -> Result<Box<dyn TdpLimitManager>> {
     Ok(match config.method {
         TdpLimitingMethod::LenovoWmi => Box::new(LenovoWmiTdpLimitManager {}),
         TdpLimitingMethod::AsusArmoury => Box::new(AsusArmouryTdpLimitManager {}),
+        TdpLimitingMethod::MsiWmi => Box::new(MsiWmiTdpLimitManager {}),
         TdpLimitingMethod::GpuHwmon => Box::new(GpuHwmonTdpLimitManager {}),
         TdpLimitingMethod::PowerStation => Box::new(PowerStationTdpLimitManager {
             gpu_card_path: Mutex::new(None),
@@ -1431,6 +1436,89 @@ impl TdpLimitManager for PowerStationTdpLimitManager {
         self.check_dbus_service(&connection).await
     }
 }
+
+impl MsiWmiTdpLimitManager {
+    const PREFIX: &str = "/sys/class/firmware-attributes/msi-wmi-platform/attributes";
+    const SPL_SUFFIX: &str = "ppt_pl1_spl";
+    const SPPT_SUFFIX: &str = "ppt_pl2_sppt";
+}
+
+#[async_trait]
+impl TdpLimitManager for MsiWmiTdpLimitManager {
+    async fn get_tdp_limit(&self) -> Result<u32> {
+        let config = platform_config().await?;
+        if let Some(config) = config
+            .as_ref()
+            .and_then(|config| config.performance_profile.as_ref())
+        {
+            ensure!(
+                get_platform_profile(&config.platform_profile_name).await? == "balanced-performance",
+                "TDP limiting not active"
+            );
+        }
+        let base = path(Self::PREFIX);
+
+        fs::read_to_string(base.join(Self::SPL_SUFFIX).join("current_value"))
+            .await
+            .map_err(|message| anyhow!("Error reading sysfs: {message}"))?
+            .trim()
+            .parse()
+            .map_err(|e| anyhow!("Error parsing value: {e}"))
+    }
+
+    async fn set_tdp_limit(&self, limit: u32) -> Result<()> {
+        ensure!(
+            self.get_tdp_limit_range().await?.contains(&limit),
+            "Invalid limit"
+        );
+
+        let limit = limit.to_string();
+        let base = path(Self::PREFIX);
+        write_synced(
+            base.join(Self::SPL_SUFFIX).join("current_value"),
+            limit.as_bytes(),
+        )
+        .await
+        .inspect_err(|message| error!("Error writing to sysfs file: {message}"))?;
+        write_synced(
+            base.join(Self::SPPT_SUFFIX).join("current_value"),
+            limit.as_bytes(),
+        )
+        .await
+        .inspect_err(|message| error!("Error writing to sysfs file: {message}"))
+    }
+
+    async fn get_tdp_limit_range(&self) -> Result<RangeInclusive<u32>> {
+        let base = path(Self::PREFIX).join(Self::SPL_SUFFIX);
+
+        let min: u32 = fs::read_to_string(base.join("min_value"))
+            .await
+            .map_err(|message| anyhow!("Error reading sysfs: {message}"))?
+            .trim()
+            .parse()
+            .map_err(|e| anyhow!("Error parsing value: {e}"))?;
+        let max: u32 = fs::read_to_string(base.join("max_value"))
+            .await
+            .map_err(|message| anyhow!("Error reading sysfs: {message}"))?
+            .trim()
+            .parse()
+            .map_err(|e| anyhow!("Error parsing value: {e}"))?;
+        Ok(min..=max)
+    }
+
+    async fn is_active(&self) -> Result<bool> {
+        let config = platform_config().await?;
+        if let Some(config) = config
+            .as_ref()
+            .and_then(|config| config.performance_profile.as_ref())
+        {
+            Ok(get_platform_profile(&config.platform_profile_name).await? == "balanced-performance")
+        } else {
+            Ok(true)
+        }
+    }
+}
+
 
 pub(crate) async fn get_max_charge_level() -> Result<i32> {
     let config = platform_config().await?;
