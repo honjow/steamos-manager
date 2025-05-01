@@ -16,6 +16,7 @@ use crate::path;
 use crate::platform::{platform_config, ServiceConfig};
 use crate::process::{run_script, script_exit_code};
 use crate::systemd::SystemdUnit;
+use tracing::debug;
 
 const SYS_VENDOR_PATH: &str = "/sys/class/dmi/id/sys_vendor";
 const BOARD_NAME_PATH: &str = "/sys/class/dmi/id/board_name";
@@ -41,6 +42,7 @@ pub(crate) enum DeviceType {
     LegionGo,
     LegionGoS,
     ZotacZone,
+    Generic,
 }
 
 #[derive(Display, EnumString, PartialEq, Debug, Copy, Clone, TryFromPrimitive)]
@@ -77,11 +79,13 @@ pub(crate) async fn device_type() -> Result<DeviceType> {
 
 pub(crate) async fn device_variant() -> Result<(DeviceType, String)> {
     let sys_vendor = fs::read_to_string(path(SYS_VENDOR_PATH)).await?;
+    let sys_vendor = sys_vendor.trim_end();
     let product_name = fs::read_to_string(path(PRODUCT_NAME_PATH)).await?;
     let product_name = product_name.trim_end();
     let board_name = fs::read_to_string(path(BOARD_NAME_PATH)).await?;
     let board_name = board_name.trim_end();
-    Ok(match (sys_vendor.trim_end(), product_name, board_name) {
+    debug!("Device variant: sys_vendor=[{sys_vendor}] product_name=[{product_name}] board_name=[{board_name}]");
+    Ok(match (sys_vendor, product_name, board_name) {
         ("LENOVO", "83E1", _) => (DeviceType::LegionGo, product_name.to_string()),
         ("LENOVO", "83L3" | "83N6" | "83Q2" | "83Q3", _) => {
             (DeviceType::LegionGoS, product_name.to_string())
@@ -94,7 +98,7 @@ pub(crate) async fn device_variant() -> Result<(DeviceType, String)> {
         ("Micro-Star International Co., Ltd.", "Claw 8 AI+ A2VM" | "Claw 7 AI+ A2VM" | "Claw A1M", _) => {
             (DeviceType::Claw, product_name.to_string())
         }
-        _ => (DeviceType::Unknown, String::from("unknown")),
+        _ => (DeviceType::Generic, product_name.to_string()),
     })
 }
 

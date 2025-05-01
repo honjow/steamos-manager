@@ -161,6 +161,7 @@ impl PlatformConfig {
             DeviceType::LegionGo => "legion-go",
             DeviceType::LegionGoS => "legion-go-s",
             DeviceType::ZotacZone => "zotac-zone",
+            DeviceType::Generic => "generic",
             _ => return Ok(None),
         };
         let config = read_to_string(format!(
