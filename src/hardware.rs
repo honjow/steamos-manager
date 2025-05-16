@@ -38,6 +38,9 @@ pub(crate) enum DeviceType {
     SteamDeck,
     LegionGo,
     LegionGoS,
+    ClawA1M,
+    Claw7AIA2VM,
+    Claw8AIA2VM,
     RogAlly,
     RogAllyX,
     ZotacGamingZone,
@@ -87,6 +90,15 @@ pub(crate) async fn device_variant() -> Result<(DeviceType, String)> {
         ("LENOVO", "83E1", _) => (DeviceType::LegionGo, product_name.to_string()),
         ("LENOVO", "83L3" | "83N6" | "83Q2" | "83Q3", _) => {
             (DeviceType::LegionGoS, product_name.to_string())
+        }
+        ("Micro-Star International Co., Ltd.", "Claw A1M", _) => {
+            (DeviceType::ClawA1M, product_name.to_string())
+        }
+        ("Micro-Star International Co., Ltd.", "Claw 7 AI+ A2VM", _) => {
+            (DeviceType::Claw7AIA2VM, product_name.to_string())
+        }
+        ("Micro-Star International Co., Ltd.", "Claw 8 AI+ A2VM", _) => {
+            (DeviceType::Claw8AIA2VM, product_name.to_string())
         }
         ("Valve", _, "Jupiter" | "Galileo") => (DeviceType::SteamDeck, board_name.to_string()),
         ("ZOTAC", _, "G0A1W") => (DeviceType::ZotacGamingZone, board_name.to_string()),
