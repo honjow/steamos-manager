@@ -6,5 +6,5 @@ suggested_default = "custom"
 method = "firmware_attribute"
 
 [tdp_limit.firmware_attribute]
-attribute = "zotac_zone_platform"
+attribute = "zotac-zone-platform"
 performance_profile = "custom"

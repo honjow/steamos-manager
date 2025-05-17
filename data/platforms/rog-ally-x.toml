@@ -7,6 +7,6 @@ suggested_default = "performance"
 method = "firmware_attribute"
 
 [tdp_limit.firmware_attribute]
-attribute = "asus_armoury"
+attribute = "asus-armoury"
 # until custom mode is added
 performance_profile = "performance"
