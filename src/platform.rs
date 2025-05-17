@@ -173,6 +173,7 @@ impl PlatformConfig {
             DeviceType::Claw8AIA2VM => "claw8-ai-a2vm",
             DeviceType::SteamDeck => "jupiter",
             DeviceType::ZotacGamingZone => "zone",
+            DeviceType::Generic => "generic",
             _ => return Ok(None),
         };
         let config = read_to_string(format!(
