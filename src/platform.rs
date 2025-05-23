@@ -171,6 +171,7 @@ impl PlatformConfig {
             DeviceType::Claw => "claw",
             DeviceType::SteamDeck => "jupiter",
             DeviceType::ZotacGamingZone => "zotac-gaming-zone",
+            DeviceType::Generic => "generic",
             _ => return Ok(None),
         };
         let config = read_to_string(format!(
