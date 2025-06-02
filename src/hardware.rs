@@ -41,6 +41,7 @@ pub(crate) enum DeviceType {
     RogAlly,
     RogAllyX,
     ZotacGamingZone,
+    Generic,
 }
 
 #[derive(Display, EnumString, PartialEq, Debug, Copy, Clone, TryFromPrimitive)]
@@ -90,7 +91,7 @@ pub(crate) async fn device_variant() -> Result<(DeviceType, String)> {
         }
         ("Valve", _, "Jupiter" | "Galileo") => (DeviceType::SteamDeck, board_name.to_string()),
         ("ZOTAC", _, "G0A1W" | "G1A1W") => (DeviceType::ZotacGamingZone, board_name.to_string()),
-        _ => (DeviceType::Unknown, String::from("unknown")),
+        _ => (DeviceType::Generic, product_name.to_string()),
     })
 }
 
