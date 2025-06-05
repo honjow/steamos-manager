@@ -171,6 +171,7 @@ impl PlatformConfig {
             DeviceType::RogAlly => "rog-ally-series",
             DeviceType::RogAllyX => "rog-ally-series",
             DeviceType::ZotacGamingZone => "zotac-gaming-zone",
+            DeviceType::Generic => "generic",
             _ => return Ok(None),
         };
         let config = read_to_string(format!(
