@@ -10,3 +10,8 @@ method = "firmware_attribute"
 attribute = "msi-wmi-platform"
 # until custom mode is added
 performance_profile = "performance"
+
+[battery_charge_limit]
+suggested_minimum_limit = 10
+hwmon_name = "BAT1"
+attribute = "device/charge_control_end_threshold"
