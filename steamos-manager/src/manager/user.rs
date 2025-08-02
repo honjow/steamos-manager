@@ -1357,7 +1357,7 @@ mod test {
                 variant: String::from("Galileo"),
             }],
             tdp_limit: Some(TdpLimitConfig {
-                method: TdpLimitingMethod::GpuHwmon,
+                method: TdpLimitingMethod::AmdgpuHwmon,
                 range: Some(RangeConfig::new(3, 15)),
                 download_mode_limit: NonZeroU32::new(6),
                 firmware_attribute: None,

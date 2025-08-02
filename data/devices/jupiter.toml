@@ -11,7 +11,7 @@ device = "steam_deck"
 variant = "Galileo"
 
 [tdp_limit]
-method = "gpu_hwmon"
+method = "amdgpu_hwmon"
 download_mode_limit = 6
 
 [tdp_limit.range]
