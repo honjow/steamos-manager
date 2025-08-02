@@ -18,9 +18,15 @@ download_mode_limit = 6
 min = 3
 max = 15
 
-[gpu_clocks]
+[gpu_performance]
+driver = "amdgpu"
+
+[gpu_performance.clocks]
 min = 200
 max = 1600
+
+[gpu_power_profile]
+driver = "amdgpu"
 
 [battery_charge_limit]
 suggested_minimum_limit = 10

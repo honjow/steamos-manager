@@ -13,9 +13,7 @@ use std::collections::HashMap;
 use std::io::Cursor;
 use steamos_manager::cec::HdmiCecState;
 use steamos_manager::hardware::{FactoryResetKind, FanControlState};
-use steamos_manager::power::{
-    CPUBoostState, CPUScalingGovernor, GPUPerformanceLevel, GPUPowerProfile,
-};
+use steamos_manager::power::{CPUBoostState, CPUScalingGovernor};
 use steamos_manager::proxy::{
     AmbientLightSensor1Proxy, BatteryChargeLimit1Proxy, CpuBoost1Proxy, CpuScaling1Proxy,
     FactoryReset1Proxy, FanControl1Proxy, GpuPerformanceLevel1Proxy, GpuPowerProfile1Proxy,
@@ -83,14 +81,14 @@ enum Commands {
 
     /// Set the GPU Power profile
     SetGPUPowerProfile {
-        /// Valid profiles are get-gpu-power-profiles.
-        profile: GPUPowerProfile,
+        /// Valid profiles can be obtained from get-gpu-power-profiles.
+        profile: String,
     },
 
     /// Set the GPU performance level
     SetGPUPerformanceLevel {
         /// Valid levels are `auto`, `low`, `high`, `manual`, `profile_peak`
-        level: GPUPerformanceLevel,
+        level: String,
     },
 
     /// Get the GPU performance level
@@ -460,16 +458,7 @@ async fn main() -> Result<()> {
         Commands::GetGPUPowerProfile => {
             let proxy = GpuPowerProfile1Proxy::new(&conn).await?;
             let profile = proxy.gpu_power_profile().await?;
-            let profile_type = GPUPowerProfile::try_from(profile.as_str());
-            match profile_type {
-                Ok(t) => {
-                    let name = t.to_string();
-                    println!("GPU Power Profile: {profile} {name}");
-                }
-                Err(_) => {
-                    println!("Unknown GPU power profile or unable to get type from {profile}");
-                }
-            }
+            println!("GPU Power Profile: {profile}");
         }
         Commands::SetGPUPowerProfile { profile } => {
             let proxy = GpuPowerProfile1Proxy::new(&conn).await?;
@@ -486,10 +475,7 @@ async fn main() -> Result<()> {
         Commands::GetGPUPerformanceLevel => {
             let proxy = GpuPerformanceLevel1Proxy::new(&conn).await?;
             let level = proxy.gpu_performance_level().await?;
-            match GPUPerformanceLevel::try_from(level.as_str()) {
-                Ok(l) => println!("GPU performance level: {l}"),
-                Err(_) => println!("Got unknown value {level} from backend"),
-            }
+            println!("GPU performance level: {level}");
         }
         Commands::SetManualGPUClock { freq } => {
             let proxy = GpuPerformanceLevel1Proxy::new(&conn).await?;

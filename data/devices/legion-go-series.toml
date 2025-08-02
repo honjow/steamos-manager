@@ -46,6 +46,12 @@ dmi.product_name = "83N1"
 device = "legion_go_2"
 variant = "83N1"
 
+[gpu_performance]
+driver = "amdgpu"
+
+[gpu_power_profile]
+driver = "amdgpu"
+
 [performance_profile]
 platform_profile_name = "lenovo-wmi-gamezone"
 suggested_default = "custom"

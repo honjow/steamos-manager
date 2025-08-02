@@ -10,6 +10,12 @@ dmi.board_name = "G1A1W"
 device = "zotac_gaming_zone"
 variant = "G1A1W"
 
+[gpu_performance]
+driver = "amdgpu"
+
+[gpu_power_profile]
+driver = "amdgpu"
+
 [performance_profile]
 platform_profile_name = "zotac_zone_platform"
 suggested_default = "custom"

@@ -21,6 +21,10 @@ use zbus::{fdo, interface, proxy, Connection};
 use crate::daemon::root::{Command, RootCommand};
 use crate::daemon::DaemonCommand;
 use crate::error::{to_zbus_error, to_zbus_fdo_error};
+use crate::gpu::{
+    gpu_performance_level_driver, gpu_power_profile_driver, GpuPerformanceLevelDriver,
+    GpuPowerProfileDriver,
+};
 use crate::hardware::{
     device_config, steam_deck_variant, FactoryResetKind, FanControl, FanControlState,
     SteamDeckVariant,
@@ -28,10 +32,8 @@ use crate::hardware::{
 use crate::job::JobManager;
 use crate::platform::platform_config;
 use crate::power::{
-    set_cpu_boost_state, set_cpu_scaling_governor, set_gpu_clocks, set_gpu_performance_level,
-    set_gpu_power_profile, set_max_charge_level, set_platform_profile, tdp_limit_manager,
-    CPUBoostState, CPUScalingGovernor, GPUPerformanceLevel, GPUPowerProfile, SysfsWritten,
-    TdpLimitManager,
+    set_cpu_boost_state, set_cpu_scaling_governor, set_max_charge_level, set_platform_profile,
+    tdp_limit_manager, CPUBoostState, CPUScalingGovernor, SysfsWritten, TdpLimitManager,
 };
 use crate::process::{run_script, script_output};
 use crate::session::root::{clean_temporary_sessions, set_default_session, set_temporary_session};
@@ -56,6 +58,8 @@ pub struct SteamOSManager {
     wifi_debug_mode: WifiDebugMode,
     fan_control: FanControl,
     tdp_limit_manager: Option<Box<dyn TdpLimitManager>>,
+    gpu_performance_level: Option<Box<dyn GpuPerformanceLevelDriver>>,
+    gpu_power_profile: Option<Box<dyn GpuPowerProfileDriver>>,
     // Whether we should use trace-cmd or not.
     // True on galileo devices, false otherwise
     should_trace: bool,
@@ -70,6 +74,14 @@ impl SteamOSManager {
             tdp_limit_manager: tdp_limit_manager()
                 .await
                 .inspect_err(|e| info!("Could not set up TDP limiting: {e}"))
+                .ok(),
+            gpu_performance_level: gpu_performance_level_driver()
+                .await
+                .inspect_err(|e| info!("Could not set up GPU performance management: {e}"))
+                .ok(),
+            gpu_power_profile: gpu_power_profile_driver()
+                .await
+                .inspect_err(|e| info!("Could not set up GPU power profile management: {e}"))
                 .ok(),
             should_trace: steam_deck_variant().await? == SteamDeckVariant::Galileo,
             job_manager: JobManager::new(connection.clone()).await?,
@@ -288,8 +300,16 @@ impl SteamOSManager {
     }
 
     async fn set_gpu_power_profile(&self, value: &str) -> fdo::Result<()> {
-        let profile = GPUPowerProfile::try_from(value).map_err(to_zbus_fdo_error)?;
-        set_gpu_power_profile(profile)
+        let Some(ref driver) = self.gpu_power_profile else {
+            return Err(fdo::Error::Failed(String::from(
+                "GPU power profile settings not configured",
+            )));
+        };
+        let profile = driver
+            .power_profile_from_str(value)
+            .map_err(to_zbus_fdo_error)?;
+        driver
+            .set_power_profile(profile)
             .await
             .inspect_err(|message| error!("Error setting GPU power profile: {message}"))
             .map_err(to_zbus_fdo_error)
@@ -315,18 +335,30 @@ impl SteamOSManager {
     }
 
     async fn set_gpu_performance_level(&self, level: &str) -> fdo::Result<()> {
-        let level = match GPUPerformanceLevel::try_from(level) {
+        let Some(ref driver) = self.gpu_performance_level else {
+            return Err(fdo::Error::Failed(String::from(
+                "GPU performance settings not configured",
+            )));
+        };
+        let level = match driver.performance_level_from_str(level) {
             Ok(level) => level,
             Err(e) => return Err(to_zbus_fdo_error(e)),
         };
-        set_gpu_performance_level(level)
+        driver
+            .set_performance_level(level)
             .await
             .inspect_err(|message| error!("Error setting GPU performance level: {message}"))
             .map_err(to_zbus_fdo_error)
     }
 
     async fn set_manual_gpu_clock(&self, clocks: u32) -> fdo::Result<()> {
-        set_gpu_clocks(clocks)
+        let Some(ref driver) = self.gpu_performance_level else {
+            return Err(fdo::Error::Failed(String::from(
+                "GPU performance settings not configured",
+            )));
+        };
+        driver
+            .set_clocks(clocks)
             .await
             .inspect_err(|message| error!("Error setting manual GPU clock: {message}"))
             .map_err(to_zbus_fdo_error)
@@ -535,10 +567,12 @@ mod test {
     use super::*;
     use crate::daemon::channel;
     use crate::daemon::root::RootContext;
+    use crate::gpu::test::{format_clocks, read_clocks};
+    use crate::gpu::{
+        self, AmdgpuPerformanceLevel, AmdgpuPerformanceLevelDriver, GpuPerformanceLevel,
+    };
     use crate::hardware::test::fake_model;
     use crate::platform::{PlatformConfig, ResetConfig};
-    use crate::power::test::{format_clocks, read_clocks};
-    use crate::power::{self, get_gpu_performance_level};
     use crate::process::test::{code, exit, ok};
     use crate::testing;
     use std::time::Duration;
@@ -560,6 +594,7 @@ mod test {
             "wifi.backend=iwd\n",
         )
         .await?;
+        gpu::test::create_nodes().await.expect("setup");
 
         let (tx, _rx) = channel::<RootContext>();
         let connection = handle.new_dbus().await?;
@@ -749,19 +784,21 @@ mod test {
     #[tokio::test]
     async fn gpu_performance_level() {
         let test = start().await.expect("start");
-        power::test::setup().await.expect("setup");
+        let driver = AmdgpuPerformanceLevelDriver {};
 
         let name = test.connection.unique_name().unwrap();
         let proxy = GpuPerformanceLevelProxy::new(&test.connection, name.clone())
             .await
             .unwrap();
         proxy
-            .set_gpu_performance_level(GPUPerformanceLevel::Low.to_string())
+            .set_gpu_performance_level(
+                GpuPerformanceLevel::Amdgpu(AmdgpuPerformanceLevel::Low).to_string(),
+            )
             .await
             .expect("proxy_set");
         assert_eq!(
-            get_gpu_performance_level().await.unwrap(),
-            GPUPerformanceLevel::Low
+            driver.get_performance_level().await.unwrap(),
+            GpuPerformanceLevel::Amdgpu(AmdgpuPerformanceLevel::Low)
         );
 
         test.connection.close().await.unwrap();
@@ -784,7 +821,6 @@ mod test {
             .await
             .unwrap();
 
-        power::test::setup().await.expect("setup");
         proxy.set_manual_gpu_clock(200).await.expect("proxy_set");
         assert_eq!(read_clocks().await.unwrap(), format_clocks(200));
 

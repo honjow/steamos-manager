@@ -10,6 +10,12 @@ dmi.board_name = "RC72LA"
 device = "rog_ally_x"
 variant = "RC72LA"
 
+[gpu_performance]
+driver = "amdgpu"
+
+[gpu_power_profile]
+driver = "amdgpu"
+
 [performance_profile]
 platform_profile_name = "asus-wmi"
 # until custom mode is added

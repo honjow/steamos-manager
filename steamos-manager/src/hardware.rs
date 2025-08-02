@@ -18,6 +18,7 @@ use tokio::sync::OnceCell;
 use tracing::error;
 use zbus::Connection;
 
+use crate::gpu::{GpuPerformanceLevelDriverType, GpuPowerProfileDriverType};
 use crate::path;
 use crate::platform::{platform_config, ServiceConfig};
 use crate::power::TdpLimitingMethod;
@@ -68,7 +69,8 @@ pub enum FactoryResetKind {
 pub(crate) struct DeviceConfig {
     pub device: Vec<DeviceMatch>,
     pub tdp_limit: Option<TdpLimitConfig>,
-    pub gpu_clocks: Option<RangeConfig<u32>>,
+    pub gpu_performance: Option<GpuPerformanceConfig>,
+    pub gpu_power_profile: Option<GpuPowerProfileConfig>,
     pub battery_charge_limit: Option<BatteryChargeLimitConfig>,
     pub performance_profile: Option<PerformanceProfileConfig>,
 }
@@ -98,6 +100,17 @@ pub(crate) struct DmiMatch {
 pub(crate) struct FirmwareAttributeConfig {
     pub attribute: String,
     pub performance_profile: Option<String>,
+}
+
+#[derive(Clone, Deserialize, Debug)]
+pub(crate) struct GpuPerformanceConfig {
+    pub driver: GpuPerformanceLevelDriverType,
+    pub clocks: Option<RangeConfig<u32>>,
+}
+
+#[derive(Clone, Deserialize, Debug)]
+pub(crate) struct GpuPowerProfileConfig {
+    pub driver: GpuPowerProfileDriverType,
 }
 
 #[derive(Clone, Deserialize, Debug)]

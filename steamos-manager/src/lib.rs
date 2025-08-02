@@ -34,6 +34,7 @@ mod uinput;
 
 pub mod cec;
 pub mod daemon;
+pub mod gpu;
 pub mod hardware;
 pub mod power;
 pub mod screenreader;
