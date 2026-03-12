@@ -19,8 +19,23 @@ device = "claw"
 variant = "Claw 8 AI+ A2VM"
 friendly_name = "MSI Claw"
 
+[performance_profile]
+platform_profile_name = "msi-wmi-platform"
+suggested_default = "balanced-performance"
+
 [gpu_performance]
 driver = "intel"
+
+[tdp_limit]
+method = "firmware_attribute"
+
+[tdp_limit.firmware_attribute]
+attribute = "msi-wmi-platform"
+
+[battery_charge_limit]
+suggested_minimum_limit = 10
+hwmon_name = "BAT1"
+attribute = "device/charge_control_end_threshold"
 
 [inputplumber]
 target_devices = ["deck-uhid", "keyboard"]
