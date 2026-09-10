@@ -93,11 +93,12 @@ impl From<WifiPowerManagement> for NmSettingWirelessPowersave {
     }
 }
 
-#[derive(Display, EnumString, PartialEq, Debug, Copy, Clone, TryFromPrimitive)]
+#[derive(Display, EnumString, PartialEq, Debug, Copy, Clone, Default, TryFromPrimitive)]
 #[strum(serialize_all = "snake_case", ascii_case_insensitive)]
 #[repr(u32)]
 pub enum WifiBackend {
     Iwd = 0,
+    #[default]
     WPASupplicant = 1,
 }
 
@@ -111,7 +112,7 @@ enum NmSettingWirelessPowersave {
     Enable = 3,
 }
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Clone, Default)]
 struct NmWifiSettings {
     backend: WifiBackend,
     powersave: NmSettingWirelessPowersave,
@@ -308,17 +309,16 @@ async fn get_nm_settings() -> Result<NmWifiSettings> {
     }
     let config = builder.build().await?;
 
-    let backend;
-    if let Some(be) = config
+    let backend = if let Some(be) = config
         .get_table("device")
         .ok()
         .and_then(|mut t| t.remove("wifi.backend"))
     {
         let be = be.into_string()?;
-        backend = WifiBackend::from_str(be.as_str())?;
+        WifiBackend::from_str(be.as_str())?
     } else {
-        bail!("Wi-Fi backend not found in config");
-    }
+        WifiBackend::default()
+    };
 
     let powersave;
     if let Some(ps) = config
@@ -574,12 +574,12 @@ mod test {
             create_dir_all(path(dir)).await.expect("create_dir_all");
         }
 
-        assert!(get_nm_settings().await.is_err());
+        assert_eq!(get_nm_settings().await.unwrap(), NmWifiSettings::default());
 
         write(path(WIFI_BACKEND_PATHS[0]).join("test.conf"), "[device]")
             .await
             .expect("write");
-        assert!(get_nm_settings().await.is_err());
+        assert_eq!(get_nm_settings().await.unwrap(), NmWifiSettings::default());
 
         write(
             path(WIFI_BACKEND_PATHS[0]).join("test.conf"),
@@ -590,8 +590,8 @@ mod test {
         assert_eq!(
             get_nm_settings().await.unwrap(),
             NmWifiSettings {
-                powersave: NmSettingWirelessPowersave::default(),
                 backend: WifiBackend::Iwd,
+                ..NmWifiSettings::default()
             }
         );
 
@@ -601,7 +601,13 @@ mod test {
         )
         .await
         .expect("write");
-        assert!(get_nm_settings().await.is_err());
+        assert_eq!(
+            get_nm_settings().await.unwrap(),
+            NmWifiSettings {
+                powersave: NmSettingWirelessPowersave::Disable,
+                ..NmWifiSettings::default()
+            }
+        );
 
         write(
             path(WIFI_BACKEND_PATHS[0]).join("test.conf"),
@@ -643,7 +649,7 @@ mod test {
             .await
             .expect("create_dir_all");
 
-        assert!(get_nm_settings().await.is_err());
+        assert_eq!(get_nm_settings().await.unwrap(), NmWifiSettings::default());
 
         set_nm_settings(
             NmWifiSettings {
@@ -734,7 +740,7 @@ mod test {
             .await
             .expect("create_dir_all");
 
-        assert!(get_nm_settings().await.is_err());
+        assert_eq!(get_nm_settings().await.unwrap(), NmWifiSettings::default());
         assert_eq!(iwd.get().await.active, "active");
         assert_eq!(iwd.get().await.unit_file, "enabled");
         assert_eq!(wpa_supplicant.get().await.active, "inactive");
@@ -905,12 +911,12 @@ mod test {
             create_dir_all(path(dir)).await.expect("create_dir_all");
         }
 
-        assert!(get_wifi_backend().await.is_err());
+        assert_eq!(get_wifi_backend().await.unwrap(), WifiBackend::default());
 
         write(path(WIFI_BACKEND_PATHS[0]).join("test.conf"), "[device]")
             .await
             .expect("write");
-        assert!(get_wifi_backend().await.is_err());
+        assert_eq!(get_wifi_backend().await.unwrap(), WifiBackend::default());
 
         write(
             path(WIFI_BACKEND_PATHS[0]).join("test.conf"),
