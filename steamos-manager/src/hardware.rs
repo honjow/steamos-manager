@@ -308,9 +308,7 @@ impl DeviceConfig {
             DeviceInfo::DeviceTree { compatible } => {
                 'next: for device in &self.device {
                     if let Some(dt) = &device.dt {
-                        if !compatible
-                            .contains(&dt.compatible)
-                        {
+                        if !compatible.contains(&dt.compatible) {
                             continue;
                         }
 
@@ -954,13 +952,7 @@ pub mod test {
 
     #[tokio::test]
     async fn devtree_lookup_invalid() {
-        let _h = setup_device_tree(
-            &["qcom,sm8650"],
-            &[],
-            &[],
-        )
-        .await
-        .unwrap();
+        let _h = setup_device_tree(&["qcom,sm8650"], &[], &[]).await.unwrap();
         assert_eq!(
             steam_deck_variant().await.unwrap(),
             SteamDeckVariant::Unknown
