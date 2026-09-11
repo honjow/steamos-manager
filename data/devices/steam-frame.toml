@@ -1,0 +1,8 @@
+[[device]]
+dt.compatible = "qcom,sm8650"
+dt.present = ["board-info/board_revision"]
+device = "steam_frame"
+variant = "Deckard"
+friendly_name = "Steam Frame"
+oui = "e0-31-9e"
+

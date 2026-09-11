@@ -9,12 +9,13 @@ use anyhow::{Result, anyhow, bail, ensure};
 use linux_cec::VendorId;
 use num_enum::TryFromPrimitive;
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::num::NonZeroU32;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use strum::{Display, EnumString};
-use tokio::fs::{read_dir, read_to_string};
+use tokio::fs::{read_dir, read_to_string, try_exists};
 #[cfg(not(test))]
 use tokio::sync::OnceCell;
 use tracing::{debug, error};
@@ -38,6 +39,9 @@ static DEVICE_CONFIG: OnceCell<Option<DeviceConfig>> = OnceCell::const_new();
 const SYS_VENDOR_PATH: &str = "/sys/class/dmi/id/sys_vendor";
 const BOARD_NAME_PATH: &str = "/sys/class/dmi/id/board_name";
 const PRODUCT_NAME_PATH: &str = "/sys/class/dmi/id/product_name";
+const DEVTREE_BASE: &str = "/proc/device-tree";
+const DEVTREE_COMPATIBLE_PATH: &str = "/proc/device-tree/compatible";
+
 #[cfg(not(test))]
 const DEVICE_CONFIG_PATH: &str = "/usr/share/steamos-manager/devices";
 #[cfg(test)]
@@ -125,10 +129,20 @@ pub(crate) struct BatteryChargeLimitConfig {
 #[derive(Clone, Deserialize, Debug)]
 pub(crate) struct DeviceMatch {
     pub dmi: Option<DmiMatch>,
+    pub dt: Option<DeviceTreeMatch>,
     pub device: String,
     pub variant: String,
     pub friendly_name: Option<String>,
     pub oui: Option<VendorId>,
+}
+
+#[derive(Clone, Deserialize, Debug)]
+pub(crate) struct DeviceTreeMatch {
+    pub compatible: String,
+    #[serde(default)]
+    pub present: Vec<PathBuf>,
+    #[serde(default)]
+    pub matches: HashMap<PathBuf, String>,
 }
 
 #[derive(Clone, Deserialize, Debug)]
@@ -212,27 +226,114 @@ async fn try_read_to_string<S: AsRef<Path>>(path: S) -> std::io::Result<Option<S
     }
 }
 
-impl DeviceConfig {
-    pub(crate) async fn device_match(&self) -> Result<Option<&'_ DeviceMatch>> {
+#[derive(Clone, Debug)]
+enum DeviceInfo {
+    Dmi {
+        sys_vendor: String,
+        board_name: Option<String>,
+        product_name: Option<String>,
+    },
+    DeviceTree {
+        compatible: Vec<String>,
+    },
+}
+
+impl DeviceInfo {
+    async fn load() -> Result<Option<DeviceInfo>> {
+        if let Some(dmi) = DeviceInfo::dmi_load().await? {
+            return Ok(Some(dmi));
+        }
+        if let Some(dt) = DeviceInfo::devtree_info_load().await? {
+            return Ok(Some(dt));
+        }
+        Ok(None)
+    }
+
+    async fn dmi_load() -> Result<Option<DeviceInfo>> {
         let Some(sys_vendor) = try_read_to_string(path(SYS_VENDOR_PATH)).await? else {
             return Ok(None);
         };
-        let sys_vendor = sys_vendor.trim_end();
+        let sys_vendor = sys_vendor.trim_end().to_string();
         let board_name = try_read_to_string(path(BOARD_NAME_PATH)).await?;
-        let board_name = board_name.as_ref().map(|name| name.trim_end());
+        let board_name = board_name.as_ref().map(|name| name.trim_end().to_string());
         let product_name = try_read_to_string(path(PRODUCT_NAME_PATH)).await?;
-        let product_name = product_name.as_ref().map(|name| name.trim_end());
+        let product_name = product_name
+            .as_ref()
+            .map(|name| name.trim_end().to_string());
 
-        for device in &self.device {
-            if let Some(dmi) = &device.dmi {
-                if dmi.sys_vendor != sys_vendor {
-                    continue;
+        Ok(Some(DeviceInfo::Dmi {
+            sys_vendor,
+            board_name,
+            product_name,
+        }))
+    }
+
+    async fn devtree_info_load() -> Result<Option<DeviceInfo>> {
+        let Some(compatible) = try_read_to_string(path(DEVTREE_COMPATIBLE_PATH)).await? else {
+            return Ok(None);
+        };
+
+        let compatible = compatible.strip_suffix('\0').unwrap_or(&compatible);
+        let compatible = compatible.split('\0').map(ToString::to_string).collect();
+
+        Ok(Some(DeviceInfo::DeviceTree { compatible }))
+    }
+}
+
+impl DeviceConfig {
+    pub(crate) async fn device_match(&self) -> Result<Option<&'_ DeviceMatch>> {
+        let Some(info) = DeviceInfo::load().await? else {
+            return Ok(None);
+        };
+
+        match info {
+            DeviceInfo::Dmi {
+                sys_vendor,
+                board_name,
+                product_name,
+            } => {
+                for device in &self.device {
+                    if let Some(dmi) = &device.dmi
+                        && dmi.sys_vendor == sys_vendor
+                    {
+                        if board_name.is_some() && board_name == dmi.board_name {
+                            return Ok(Some(device));
+                        }
+                        if product_name.is_some() && product_name == dmi.product_name {
+                            return Ok(Some(device));
+                        }
+                    }
                 }
-                if board_name.is_some() && board_name == dmi.board_name.as_deref() {
-                    return Ok(Some(device));
-                }
-                if product_name.is_some() && product_name == dmi.product_name.as_deref() {
-                    return Ok(Some(device));
+            }
+            DeviceInfo::DeviceTree { compatible } => {
+                'next: for device in &self.device {
+                    if let Some(dt) = &device.dt {
+                        if !compatible
+                            .contains(&dt.compatible)
+                        {
+                            continue;
+                        }
+
+                        for present in &dt.present {
+                            let path = path(DEVTREE_BASE).join(present);
+                            if !try_exists(path).await? {
+                                continue 'next;
+                            }
+                        }
+
+                        for (p, m) in dt.matches.iter() {
+                            let path = path(DEVTREE_BASE).join(p);
+                            let Some(contents) = try_read_to_string(path).await? else {
+                                continue 'next;
+                            };
+
+                            if contents != *m {
+                                continue 'next;
+                            }
+                        }
+
+                        return Ok(Some(device));
+                    }
                 }
             }
         }
@@ -465,6 +566,34 @@ pub mod test {
         if let Some(config) = DeviceConfig::load().await? {
             h.test.set_device_config(config).await;
         }
+        Ok(h)
+    }
+
+    async fn setup_device_tree(
+        compatible: &[&str],
+        present: &[&Path],
+        matches: &[&(&Path, &str)],
+    ) -> Result<testing::TestHandle> {
+        let h = testing::start();
+
+        create_dir_all(path(DEVTREE_BASE)).await?;
+
+        let compatible = compatible.join("\0") + "\0";
+        write(path(DEVTREE_COMPATIBLE_PATH), compatible).await?;
+        for present in present {
+            let p = path(DEVTREE_BASE).join(present);
+            create_dir_all(p.parent().unwrap()).await?;
+            write(p, "").await?;
+        }
+        for (p, m) in matches {
+            let p = path(DEVTREE_BASE).join(p);
+            create_dir_all(p.parent().unwrap()).await?;
+            write(p, m).await?;
+        }
+        if let Some(config) = DeviceConfig::load().await? {
+            h.test.set_device_config(config).await;
+        }
+
         Ok(h)
     }
 
@@ -820,6 +949,44 @@ pub mod test {
         assert_eq!(
             device_variant().await.unwrap(),
             (String::from("bc250"), String::from("BC-250"))
+        );
+    }
+
+    #[tokio::test]
+    async fn devtree_lookup_invalid() {
+        let _h = setup_device_tree(
+            &["qcom,sm8650"],
+            &[],
+            &[],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            steam_deck_variant().await.unwrap(),
+            SteamDeckVariant::Unknown
+        );
+        assert_eq!(
+            device_variant().await.unwrap(),
+            (String::from("unknown"), String::from("unknown"))
+        );
+    }
+
+    #[tokio::test]
+    async fn devtree_lookup_steam_frame_deckard() {
+        let _h = setup_device_tree(
+            &["qcom,sm8650"],
+            &[PathBuf::from("board-info/board_revision").as_path()],
+            &[],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            steam_deck_variant().await.unwrap(),
+            SteamDeckVariant::Unknown
+        );
+        assert_eq!(
+            device_variant().await.unwrap(),
+            (String::from("steam_frame"), String::from("Deckard"))
         );
     }
 

@@ -2184,6 +2184,7 @@ mod test {
                     board_name: Some(String::from("Galileo")),
                     product_name: None,
                 }),
+                dt: None,
                 device: String::from("steam_deck"),
                 variant: String::from("Galileo"),
                 friendly_name: Some(String::from("Steam Deck")),
