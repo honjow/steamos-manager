@@ -504,7 +504,7 @@ impl SteamOSManager {
             debug!("SetGpuPerformanceLevel: discarding out of order serial");
             return Ok(());
         }
-        let Some(ref driver) = self.gpu_performance_level else {
+        let Some(driver) = self.gpu_performance_level.as_mut() else {
             return Err(fdo::Error::Failed(String::from(
                 "GPU performance settings not configured",
             )));
@@ -529,7 +529,7 @@ impl SteamOSManager {
             debug!("SetManualGpuClock: discarding out of order serial");
             return Ok(());
         }
-        let Some(ref driver) = self.gpu_performance_level else {
+        let Some(driver) = self.gpu_performance_level.as_mut() else {
             return Err(fdo::Error::Failed(String::from(
                 "GPU performance settings not configured",
             )));

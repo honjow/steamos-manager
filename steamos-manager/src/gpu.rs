@@ -131,11 +131,11 @@ pub(crate) trait GpuPerformanceLevelDriver: Send + Sync {
     fn performance_level_from_str(&self, value: &str) -> Result<GpuPerformanceLevel>;
     async fn get_available_performance_levels(&self) -> Result<Vec<GpuPerformanceLevel>>;
     async fn get_performance_level(&self) -> Result<GpuPerformanceLevel>;
-    async fn set_performance_level(&self, level: GpuPerformanceLevel) -> Result<()>;
+    async fn set_performance_level(&mut self, level: GpuPerformanceLevel) -> Result<()>;
 
     async fn get_clocks_range(&self) -> Result<RangeInclusive<u32>>;
     async fn get_clocks(&self) -> Result<u32>;
-    async fn set_clocks(&self, clocks: u32) -> Result<()>;
+    async fn set_clocks(&mut self, clocks: u32) -> Result<()>;
 }
 
 pub(crate) async fn gpu_power_profile_driver() -> Result<Box<dyn GpuPowerProfileDriver>> {
@@ -318,7 +318,7 @@ impl GpuPerformanceLevelDriver for AmdgpuPerformanceLevelDriver {
         ))
     }
 
-    async fn set_performance_level(&self, level: GpuPerformanceLevel) -> Result<()> {
+    async fn set_performance_level(&mut self, level: GpuPerformanceLevel) -> Result<()> {
         let GpuPerformanceLevel::Amdgpu(level) = level else {
             bail!("This is not an amdgpu-compatible performance level");
         };
@@ -359,7 +359,7 @@ impl GpuPerformanceLevelDriver for AmdgpuPerformanceLevelDriver {
         Ok(min..=max)
     }
 
-    async fn set_clocks(&self, clocks: u32) -> Result<()> {
+    async fn set_clocks(&mut self, clocks: u32) -> Result<()> {
         // Set GPU clocks to given value valid
         // Only used when GPU Performance Level is manual, but write whenever called.
         let base = find_hwmon(AMDGPU_HWMON_NAME).await?;
@@ -530,7 +530,7 @@ impl GpuPerformanceLevelDriver for IntelGpuPerformanceLevelDriver {
         Ok(performance_level)
     }
 
-    async fn set_performance_level(&self, level: GpuPerformanceLevel) -> Result<()> {
+    async fn set_performance_level(&mut self, level: GpuPerformanceLevel) -> Result<()> {
         let GpuPerformanceLevel::Intel(level) = level else {
             bail!("This is not an Intel-compatible performance level");
         };
@@ -577,7 +577,7 @@ impl GpuPerformanceLevelDriver for IntelGpuPerformanceLevelDriver {
         self.read_freq(self.config.min_freq).await
     }
 
-    async fn set_clocks(&self, clocks: u32) -> Result<()> {
+    async fn set_clocks(&mut self, clocks: u32) -> Result<()> {
         let current_level = self.get_performance_level().await?;
 
         if current_level == GpuPerformanceLevel::Intel(IntelPerformanceLevel::Auto) {
@@ -774,7 +774,7 @@ CCLK_RANGE in Core0:
     #[tokio::test]
     async fn test_set_gpu_performance_level() {
         let _h = testing::start();
-        let driver = AmdgpuPerformanceLevelDriver {};
+        let mut driver = AmdgpuPerformanceLevelDriver {};
 
         setup_amdgpu().await.expect("setup_amdgpu");
         let base = find_hwmon(AMDGPU_HWMON_NAME).await.unwrap();
@@ -848,7 +848,7 @@ CCLK_RANGE in Core0:
     #[tokio::test]
     async fn test_set_amdgpu_gpu_clocks() {
         let _h = testing::start();
-        let driver = AmdgpuPerformanceLevelDriver {};
+        let mut driver = AmdgpuPerformanceLevelDriver {};
 
         assert!(driver.set_clocks(1600).await.is_err());
         setup_amdgpu().await.expect("setup_amdgpu");
@@ -1245,7 +1245,7 @@ CCLK_RANGE in Core0:
 
         setup_intel_i915().await.expect("setup_intel_i915");
 
-        let driver = IntelGpuPerformanceLevelDriver::new()
+        let mut driver = IntelGpuPerformanceLevelDriver::new()
             .await
             .expect("Intel i915 driver creation");
 
@@ -1378,7 +1378,7 @@ CCLK_RANGE in Core0:
 
         setup_intel_xe().await.expect("setup_intel_xe");
 
-        let driver = IntelGpuPerformanceLevelDriver::new()
+        let mut driver = IntelGpuPerformanceLevelDriver::new()
             .await
             .expect("Intel Xe driver creation");
 
@@ -1452,7 +1452,7 @@ CCLK_RANGE in Core0:
 
         setup_intel_i915().await.expect("setup_intel_i915");
 
-        let driver = IntelGpuPerformanceLevelDriver::new()
+        let mut driver = IntelGpuPerformanceLevelDriver::new()
             .await
             .expect("Intel driver creation");
 
