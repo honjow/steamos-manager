@@ -162,6 +162,14 @@ pub(crate) async fn write_synced<P: AsRef<Path>>(path: P, bytes: &[u8]) -> std::
     file.sync_data().await
 }
 
+async fn try_read_to_string<S: AsRef<Path>>(path: S) -> std::io::Result<Option<String>> {
+    match read_to_string(path.as_ref()).await {
+        Ok(content) => Ok(Some(content)),
+        Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
 pub(crate) fn read_comm(pid: u32) -> Result<String> {
     let comm = std::fs::read_to_string(path(format!("/proc/{pid}/comm")))?;
     Ok(comm.trim_end().to_string())

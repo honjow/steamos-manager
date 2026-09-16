@@ -28,9 +28,9 @@ use zbus::names::{BusName, OwnedBusName, UniqueName};
 use zbus::object_server::{Interface, SignalEmitter};
 use zbus::proxy::{Builder, CacheProperties, PropertyStream};
 use zbus::zvariant::{Fd, OwnedObjectPath};
-use zbus::{Connection, ObjectServer, Proxy, interface, zvariant};
+use zbus::{Connection, ObjectServer, Proxy, zvariant};
 
-use steamos_manager_macros::{RemoteManager, remote};
+use steamos_manager_macros::{RemoteManager, interface, remote};
 
 use crate::cec::{CecdService, HdmiCecControl, HdmiCecState};
 use crate::daemon::DaemonCommand;
@@ -67,7 +67,7 @@ use crate::session::{
 use crate::wifi::{
     WifiBackend, get_wifi_backend, get_wifi_power_management_state, list_wifi_interfaces,
 };
-use crate::{SerialOrderValidator, Service};
+use crate::{SerialOrderValidator, Service, try_read_to_string};
 
 macro_rules! method {
     ($self:expr, $method:expr, $($args:expr),+) => {
@@ -291,6 +291,32 @@ pub(crate) struct ScreenReaderSetupService {
     channel: broadcast::Receiver<SessionManagerMessage>,
 }
 
+async fn validate_header(header: &Header<'_>, connection: &Connection) -> fdo::Result<()> {
+    let Some(sender) = header.sender() else {
+        return Err(fdo::Error::AuthFailed(String::from(
+            "Messages require a sender",
+        )));
+    };
+    let proxy = DBusProxy::new(connection).await?;
+    let pid = proxy
+        .get_connection_unix_process_id(BusName::Unique(sender.clone()))
+        .await?;
+    let Some(cgroup) = try_read_to_string(path(format!("/proc/{pid}/cgroup")))
+        .await
+        .map_err(to_zbus_fdo_error)?
+    else {
+        return Err(fdo::Error::AuthFailed(String::from(
+            "Could not validate sender",
+        )));
+    };
+    if cgroup.contains("/app-steam-app") {
+        return Err(fdo::Error::AuthFailed(String::from(
+            "Cannot message SteamOS Manager from within a game",
+        )));
+    }
+    Ok(())
+}
+
 #[interface(name = "com.steampowered.SteamOSManager1.AmbientLightSensor1")]
 impl AmbientLightSensor1 {
     #[zbus(property(emits_changed_signal = "false"))]
@@ -324,14 +350,14 @@ impl BatteryChargeLimit1 {
     }
 
     #[zbus(property(emits_changed_signal = "const"))]
-    async fn suggested_minimum_limit(&self) -> i32 {
+    async fn suggested_minimum_limit(&self) -> fdo::Result<i32> {
         let Ok(Some(config)) = device_config().await else {
-            return BATTERY_DEFAULT_SUGGESTED_MINIMUM_LIMIT;
+            return Ok(BATTERY_DEFAULT_SUGGESTED_MINIMUM_LIMIT);
         };
         let Some(ref config) = config.battery_charge_limit else {
-            return BATTERY_DEFAULT_SUGGESTED_MINIMUM_LIMIT;
+            return Ok(BATTERY_DEFAULT_SUGGESTED_MINIMUM_LIMIT);
         };
-        config.suggested_minimum_limit
+        Ok(config.suggested_minimum_limit)
     }
 }
 
@@ -1339,9 +1365,10 @@ impl TdpLimit1 {
             .send(TdpManagerCommand::GetTdpLimit(tx))
             .is_err()
         {
-            return 0;
+            0
+        } else {
+            rx.await.unwrap_or(Ok(0)).unwrap_or(0)
         }
-        rx.await.unwrap_or(Ok(0)).unwrap_or(0)
     }
 
     #[zbus(property)]
@@ -1370,9 +1397,8 @@ impl TdpLimit1 {
             .send(TdpManagerCommand::GetTdpLimitRange(tx))
             .is_err()
         {
-            return 0;
-        }
-        if let Ok(range) = rx.await {
+            0
+        } else if let Ok(range) = rx.await {
             range.map(|r| *r.start()).unwrap_or(0)
         } else {
             0
@@ -1387,9 +1413,8 @@ impl TdpLimit1 {
             .send(TdpManagerCommand::GetTdpLimitRange(tx))
             .is_err()
         {
-            return 0;
-        }
-        if let Ok(range) = rx.await {
+            0
+        } else if let Ok(range) = rx.await {
             range.map(|r| *r.end()).unwrap_or(0)
         } else {
             0
@@ -2084,6 +2109,7 @@ mod test {
 
     use anyhow::{anyhow, bail, ensure};
     use linux_cec::VendorId;
+    use nix::unistd::getpid;
     use std::num::{NonZero, NonZeroU32};
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
@@ -2093,6 +2119,7 @@ mod test {
     use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
     use tokio::time::sleep;
     use zbus::object_server::Interface;
+    use zbus::proxy;
 
     struct TestHandle<S: TestSetup> {
         handle: testing::TestHandle,
@@ -2232,9 +2259,18 @@ mod test {
     #[interface(name = "com.steampowered.CecDaemon1.Config1")]
     impl MockCecdConfig1 {
         #[zbus(property)]
-        fn wake_tv(&self) -> bool {
+        async fn wake_tv(&self) -> bool {
             true
         }
+    }
+
+    #[proxy(
+        name = "com.steampowered.CecDaemon1.Config1",
+        default_path = "/com/steampowered/CecDaemon1/Daemon"
+    )]
+    trait MockCecdConfig1 {
+        #[zbus(property)]
+        fn wake_tv(&self) -> fdo::Result<bool>;
     }
 
     struct CecdSetup;
@@ -2410,6 +2446,44 @@ mod test {
         let remote =
             testing::InterfaceIntrospection::from_remote::<I, _>(connection, MANAGER_PATH).await;
         remote.is_err()
+    }
+
+    #[tokio::test]
+    async fn test_validate_cgroup() {
+        let mut handle = testing::start();
+        let connection = handle.new_dbus().await.unwrap();
+        connection
+            .request_name("com.steampowered.CecDaemon1")
+            .await
+            .unwrap();
+        connection
+            .object_server()
+            .at("/com/steampowered/CecDaemon1/Daemon", MockCecdConfig1 {})
+            .await
+            .unwrap();
+
+        let new_conn = handle.new_connection().await.unwrap();
+        let proxy = MockCecdConfig1Proxy::builder(&new_conn)
+            .destination(
+                connection
+                    .unique_name()
+                    .ok_or(anyhow!("no unique name"))
+                    .unwrap(),
+            )
+            .unwrap()
+            .cache_properties(CacheProperties::No)
+            .build()
+            .await
+            .unwrap();
+        assert!(proxy.wake_tv().await.is_ok());
+        let pid = getpid();
+        write(
+            path(format!("/proc/{pid}/cgroup")),
+            "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-steam-app1-1234.scope",
+        )
+        .await
+        .unwrap();
+        assert!(proxy.wake_tv().await.is_err());
     }
 
     #[tokio::test]
@@ -3481,7 +3555,7 @@ mod test {
         }
 
         #[zbus(property)]
-        async fn set_max_charge_level(&mut self, limit: i32) -> () {
+        async fn set_max_charge_level(&mut self, limit: i32) {
             self.limit = limit;
         }
 

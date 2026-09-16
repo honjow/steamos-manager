@@ -14,17 +14,23 @@ use syn::parse::{self, Parse, ParseStream};
 use syn::spanned::Spanned;
 use syn::{
     self, Attribute, Error, Fields, FnArg, GenericArgument, Ident, ImplItem, ItemImpl, ItemStruct,
-    Meta, PathArguments, ReturnType, Type, TypePath, parse_macro_input,
+    Meta, Pat, PatType, PathArguments, ReturnType, Token, Type, TypePath, parse_macro_input,
 };
 
 #[derive(Debug)]
-struct Interface {
+struct BaseInterface {
     name: String,
     properties: Vec<Property>,
     methods: Vec<Method>,
     register: Option<Ident>,
     unregister: Option<Ident>,
     context: Option<Type>,
+}
+
+#[derive(Debug)]
+struct Interface {
+    name: Ident,
+    items: Vec<ImplItem>,
 }
 
 #[derive(Debug)]
@@ -167,6 +173,19 @@ impl Parse for Interface {
         let Type::Path(path) = *iface_impl.self_ty else {
             return Err(syn::Error::new(input.span(), "Invalid name identifier"));
         };
+        let name = path.path.require_ident()?.clone();
+        let items = iface_impl.items.clone();
+
+        Ok(Interface { name, items })
+    }
+}
+
+impl Parse for BaseInterface {
+    fn parse(input: ParseStream<'_>) -> parse::Result<BaseInterface> {
+        let iface_impl: ItemImpl = input.parse()?;
+        let Type::Path(path) = *iface_impl.self_ty else {
+            return Err(syn::Error::new(input.span(), "Invalid name identifier"));
+        };
         let name = path.path.require_ident()?;
         let mut properties = Vec::new();
         let mut methods = Vec::new();
@@ -278,7 +297,7 @@ impl Parse for Interface {
             }
         }
 
-        Ok(Interface {
+        Ok(BaseInterface {
             name: name.to_string(),
             methods,
             properties,
@@ -371,6 +390,184 @@ impl Parse for RemoteInterface {
 }
 
 impl ToTokens for Interface {
+    fn to_tokens(&self, stream: &mut TokenStream2) {
+        let name = &self.name;
+        let mut items = TokenStream2::new();
+
+        for item in &self.items {
+            let ImplItem::Fn(fn_item) = item else {
+                item.to_tokens(&mut items);
+                continue;
+            };
+
+            let mut fn_item = fn_item.clone();
+            let sig = &mut fn_item.sig;
+
+            let mut option;
+            let header_name;
+            let connection_name;
+            let mut ns = Ident::new("fdo", Span::call_site());
+
+            fn is_zbus_attr(arg: &PatType, var: &str) -> bool {
+                if !arg.attrs.iter().any(|attr| {
+                    let Meta::List(attr) = &attr.meta else {
+                        return false;
+                    };
+                    let Ok(path) = attr.path.require_ident() else {
+                        return false;
+                    };
+                    if path != "zbus" {
+                        return false;
+                    }
+                    let Ok(ident) = syn::parse::<Ident>(attr.tokens.clone().into()) else {
+                        return false;
+                    };
+                    ident == var
+                }) {
+                    return false;
+                }
+                true
+            }
+
+            // Find Header varible, if present
+            if let Some(header) = sig.inputs.iter().find_map(|arg| {
+                let FnArg::Typed(arg) = arg else {
+                    return None;
+                };
+                if !is_zbus_attr(arg, "header") {
+                    return None;
+                }
+                let Pat::Ident(name) = &*arg.pat else {
+                    return None;
+                };
+                let Type::Path(ty) = &*arg.ty else {
+                    return None;
+                };
+                let option = if let Some(ident) = ty.path.segments.first().map(|seg| &seg.ident) {
+                    ident == "Option"
+                } else {
+                    false
+                };
+                Some((name.ident.clone(), option))
+            }) {
+                (header_name, option) = header;
+            } else {
+                option = false;
+                for attr in &fn_item.attrs {
+                    let Meta::List(attr) = &attr.meta else {
+                        continue;
+                    };
+                    let Ok(path) = attr.path.require_ident() else {
+                        continue;
+                    };
+                    if path != "zbus" {
+                        continue;
+                    }
+                    let Some(TokenTree::Ident(ident)) = attr.tokens.clone().into_iter().next()
+                    else {
+                        continue;
+                    };
+                    if ident != "property" {
+                        continue;
+                    }
+                    option = true;
+                    if sig.ident.to_string().starts_with("set_") {
+                        ns = Ident::new("zbus", Span::call_site());
+                    }
+                    break;
+                }
+                let arg = syn::parse::<FnArg>(
+                    if option {
+                        quote!(#[zbus(header)] header: Option<Header<'_>>)
+                    } else {
+                        quote!(#[zbus(header)] header: Header<'_>)
+                    }
+                    .into(),
+                )
+                .unwrap();
+                sig.inputs.push(arg);
+                header_name = Ident::new("header", Span::call_site());
+            }
+
+            // Find Connection variable, if present
+            if let Some(connection) = sig.inputs.iter().find_map(|arg| {
+                let FnArg::Typed(arg) = arg else {
+                    return None;
+                };
+                if !is_zbus_attr(arg, "connection") {
+                    return None;
+                }
+                let Pat::Ident(name) = &*arg.pat else {
+                    return None;
+                };
+                Some(name.ident.clone())
+            }) {
+                connection_name = connection;
+            } else {
+                let arg =
+                    syn::parse::<FnArg>(quote!(#[zbus(connection)] connection: &Connection).into())
+                        .unwrap();
+                sig.inputs.push(arg);
+                connection_name = Ident::new("connection", Span::call_site());
+            }
+
+            let validate_header = if option {
+                quote!(if let Some(ref header) = #header_name {
+                    validate_header(&header, #connection_name).await?;
+                })
+            } else {
+                quote!(validate_header(&#header_name, #connection_name).await?;)
+            };
+
+            let mut block = TokenStream2::new();
+            let fn_block = &fn_item.block;
+            if let ReturnType::Type(_, ty) = &sig.output {
+                if let Type::Path(path) = &**ty {
+                    let last = path.path.segments.last();
+                    if let Some(last) = last
+                        && last.ident == "Result"
+                    {
+                        quote!({
+                            #validate_header
+                            #fn_block
+                        })
+                        .to_tokens(&mut block);
+                    } else {
+                        let ret = syn::parse::<TypePath>(quote!(#ns::Result<#ty>).into()).unwrap();
+                        sig.output =
+                            ReturnType::Type(<Token![->]>::default(), Box::new(Type::Path(ret)));
+                        quote!({
+                            #validate_header
+                            Ok(#fn_block)
+                        })
+                        .to_tokens(&mut block);
+                    }
+                } else {
+                    todo!("unimplemented return");
+                };
+            } else {
+                let ret = syn::parse::<TypePath>(quote!(#ns::Result<()>).into()).unwrap();
+                sig.output = ReturnType::Type(<Token![->]>::default(), Box::new(Type::Path(ret)));
+                quote!({
+                    #validate_header
+                    #fn_block
+                    Ok(())
+                })
+                .to_tokens(&mut block);
+            }
+            fn_item.block = syn::parse(block.into()).unwrap();
+            fn_item.to_tokens(&mut items);
+        }
+
+        stream.extend(quote! {
+            impl #name {
+                #items
+            }
+        });
+    }
+}
+
+impl ToTokens for BaseInterface {
     fn to_tokens(&self, stream: &mut TokenStream2) {
         let mut substream = TokenStream2::new();
         let mut signals = Vec::new();
@@ -703,7 +900,7 @@ impl ToTokens for Interface {
     }
 }
 
-impl Interface {
+impl BaseInterface {
     fn split_attrs(&mut self, attr: TokenStream2) -> parse::Result<TokenStream2> {
         let mut new_attrs = TokenStream2::new();
         let mut accum = TokenStream2::new();
@@ -812,9 +1009,21 @@ impl ToTokens for Property {
 }
 
 #[proc_macro_attribute]
+pub fn interface(attr: TokenStream, input: TokenStream) -> TokenStream {
+    let iface = parse_macro_input!(input as Interface);
+    let attr = TokenStream2::from(attr);
+
+    let out = quote! {
+        #[zbus::interface(#attr)]
+        #iface
+    };
+    out.into()
+}
+
+#[proc_macro_attribute]
 pub fn remote(attr: TokenStream, input: TokenStream) -> TokenStream {
     let imp: TokenStream2 = input.clone().into();
-    let mut iface = parse_macro_input!(input as Interface);
+    let mut iface = parse_macro_input!(input as BaseInterface);
     let attr = iface
         .split_attrs(attr.into())
         .unwrap_or_else(syn::Error::into_compile_error);

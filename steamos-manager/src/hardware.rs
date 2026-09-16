@@ -10,7 +10,6 @@ use linux_cec::VendorId;
 use num_enum::TryFromPrimitive;
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::io::ErrorKind;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -31,7 +30,7 @@ use crate::power::{
 };
 use crate::process::{run_script, script_exit_code};
 use crate::systemd::{JobMode, SystemdUnit};
-use crate::write_synced;
+use crate::{try_read_to_string, write_synced};
 
 #[cfg(not(test))]
 static DEVICE_CONFIG: OnceCell<Option<DeviceConfig>> = OnceCell::const_new();
@@ -216,14 +215,6 @@ pub(crate) struct FanSpeedConfig {
     pub hwmon: String,
     pub attribute: String,
     pub download_mode_fan_speed: Option<NonZeroU32>,
-}
-
-async fn try_read_to_string<S: AsRef<Path>>(path: S) -> std::io::Result<Option<String>> {
-    match read_to_string(path.as_ref()).await {
-        Ok(content) => Ok(Some(content)),
-        Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(e),
-    }
 }
 
 #[derive(Clone, Debug)]

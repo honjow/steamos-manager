@@ -1,7 +1,7 @@
 use anyhow::{Result, anyhow, bail};
 use libc::pid_t;
 use nix::sys::signal;
-use nix::unistd::Pid;
+use nix::unistd::{Pid, getpid};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
@@ -12,7 +12,7 @@ use std::str::FromStr;
 use std::sync::{self, Arc, Once};
 use std::time::Duration;
 use tempfile::{TempDir, tempdir};
-use tokio::fs::{create_dir_all, read};
+use tokio::fs::{create_dir_all, read, write};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
@@ -28,6 +28,7 @@ use zbus::zvariant::ObjectPath;
 use zbus_xml::{Method, Node, Property, Signal};
 
 use crate::hardware::DeviceConfig;
+use crate::path;
 use crate::platform::PlatformConfig;
 
 static INIT: Once = Once::new();
@@ -228,6 +229,9 @@ impl TestHandle {
         }
         let dbus = MockDBus::new().await?;
         let connection = dbus.connection.clone();
+        let pid = getpid();
+        create_dir_all(path(format!("/proc/{pid}"))).await?;
+        write(path(format!("/proc/{pid}/cgroup")), "0::/").await?;
         *self.test.dbus_address.lock().await = Some(dbus.address.clone());
         *self.test.mock_dbus.lock().unwrap() = Some(dbus);
         Ok(connection)
