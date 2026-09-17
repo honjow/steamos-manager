@@ -319,7 +319,6 @@ impl GpuPerformanceLevelDriver for AmdgpuPerformanceLevelDriver {
     }
 
     async fn set_performance_level(&self, level: GpuPerformanceLevel) -> Result<()> {
-        #[allow(irrefutable_let_patterns)] // Remove when more values are added
         let GpuPerformanceLevel::Amdgpu(level) = level else {
             bail!("This is not an amdgpu-compatible performance level");
         };
