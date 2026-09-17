@@ -60,13 +60,13 @@ pub enum AmdgpuPowerProfile {
     Uncapped = 9,
 }
 
-#[derive(PartialEq, Debug, Copy, Clone)]
+#[derive(PartialEq, Eq, Debug, Copy, Clone, Hash)]
 pub enum GpuPerformanceLevel {
     Amdgpu(AmdgpuPerformanceLevel),
     Intel(IntelPerformanceLevel),
 }
 
-#[derive(Display, EnumString, PartialEq, Debug, Copy, Clone)]
+#[derive(Display, EnumString, PartialEq, Eq, Debug, Copy, Clone, Hash)]
 #[strum(serialize_all = "snake_case")]
 pub enum AmdgpuPerformanceLevel {
     Auto,
@@ -76,7 +76,7 @@ pub enum AmdgpuPerformanceLevel {
     ProfilePeak,
 }
 
-#[derive(Display, EnumString, PartialEq, Debug, Copy, Clone)]
+#[derive(Display, EnumString, PartialEq, Eq, Debug, Copy, Clone, Hash)]
 #[strum(serialize_all = "snake_case")]
 pub enum IntelPerformanceLevel {
     Auto,
@@ -90,7 +90,7 @@ pub enum GpuPowerProfileDriverType {
     Amdgpu,
 }
 
-#[derive(Deserialize, Display, EnumString, VariantNames, PartialEq, Debug, Clone)]
+#[derive(Deserialize, Display, EnumString, VariantNames, PartialEq, Eq, Debug, Clone, Hash)]
 #[strum(serialize_all = "snake_case", ascii_case_insensitive)]
 #[serde(rename_all = "snake_case")]
 pub enum GpuPerformanceLevelDriverType {
