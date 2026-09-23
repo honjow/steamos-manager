@@ -808,9 +808,7 @@ mod test {
     use crate::daemon::channel;
     use crate::daemon::root::RootContext;
     use crate::gpu::test::{Nodes as GpuNodes, format_clocks, read_clocks};
-    use crate::gpu::{
-        self, AmdgpuPerformanceLevel, AmdgpuPerformanceLevelDriver, GpuPerformanceLevel,
-    };
+    use crate::gpu::{self, AmdgpuPerformanceLevel, GpuPerformanceLevel};
     use crate::hardware::test::fake_model;
     use crate::platform::{PlatformConfig, ResetConfig};
     use crate::process::test::{code, exit, ok};
@@ -1028,7 +1026,7 @@ mod test {
     #[tokio::test]
     async fn gpu_performance_level() {
         let test = start().await.expect("start");
-        let driver = AmdgpuPerformanceLevelDriver {};
+        let driver = gpu_performance_level_driver().await.unwrap();
 
         let name = test.connection.unique_name().unwrap();
         let proxy = GpuPerformanceLevelProxy::new(&test.connection, name.clone())

@@ -133,18 +133,18 @@ pub enum TdpLimitingMethod {
 }
 
 #[derive(Debug)]
-pub(crate) struct AmdgpuHwmonTdpLimitManager {
+struct AmdgpuHwmonTdpLimitManager {
     performance_profile: Option<String>,
 }
 
 #[derive(Debug)]
-pub(crate) struct FirmwareAttributeLimitManager {
+struct FirmwareAttributeLimitManager {
     attribute: String,
     performance_profile: Option<String>,
 }
 
 #[derive(Debug)]
-pub(crate) struct RemoteInterfaceLimitManager<'proxy> {
+struct RemoteInterfaceLimitManager<'proxy> {
     connection: Connection,
     proxy: Option<TdpLimit1Proxy<'proxy>>,
 }

@@ -99,19 +99,19 @@ pub enum GpuPerformanceLevelDriverType {
 }
 
 #[derive(Debug)]
-pub(crate) struct AmdgpuPowerProfileDriver {}
+struct AmdgpuPowerProfileDriver {}
 
 #[derive(Debug)]
-pub(crate) struct AmdgpuPerformanceLevelDriver {}
+struct AmdgpuPerformanceLevelDriver {}
 
 #[derive(Debug)]
-pub(crate) struct IntelGpuPerformanceLevelDriver {
+struct IntelGpuPerformanceLevelDriver {
     card_path: PathBuf,
     config: IntelGpuConfig,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct IntelGpuConfig {
+struct IntelGpuConfig {
     min_freq: &'static str,
     max_freq: &'static str,
     range_min: &'static str,
