@@ -548,9 +548,20 @@ impl TdpLimitManager for FirmwareAttributeLimitManager {
             .and_then(|s| s.trim().parse::<u32>().ok())
             .unwrap_or(0);
 
+        let sppt_max = fs::read_to_string(base.join(Self::SPPT_SUFFIX).join("max_value"))
+            .await
+            .ok()
+            .and_then(|s| s.trim().parse::<u32>().ok())
+            .unwrap_or(u32::MAX);
+        let fppt_max = fs::read_to_string(base.join(Self::FPPT_SUFFIX).join("max_value"))
+            .await
+            .ok()
+            .and_then(|s| s.trim().parse::<u32>().ok())
+            .unwrap_or(u32::MAX);
+
         let spl_value = limit;
-        let sppt_value = limit.max(sppt_min);
-        let fppt_value = limit.max(fppt_min);
+        let sppt_value = (limit + 1).clamp(sppt_min, sppt_max);
+        let fppt_value = (limit + 2).clamp(fppt_min, fppt_max);
 
         write_synced(
             base.join(Self::SPL_SUFFIX).join("current_value"),
@@ -1975,13 +1986,13 @@ pub(crate) mod test {
             read_to_string(sppt_base.join("current_value"))
                 .await
                 .unwrap(),
-            "15"
+            "16"
         );
         assert_eq!(
             read_to_string(fppt_base.join("current_value"))
                 .await
                 .unwrap(),
-            "15"
+            "17"
         );
 
         manager.set_tdp_limit(25).await.unwrap_err();
@@ -2016,6 +2027,72 @@ pub(crate) mod test {
             .unwrap();
 
         manager.set_tdp_limit(10).await.unwrap_err();
+    }
+
+    #[tokio::test]
+    async fn test_firmware_attribute_tdp_limiter_boost_bounds() {
+        let _h = testing::start();
+        let manager = FirmwareAttributeLimitManager {
+            attribute: String::from("tdp0"),
+            performance_profile: None,
+        };
+        let base = path(FirmwareAttributeLimitManager::PREFIX)
+            .join("tdp0")
+            .join("attributes");
+        let suffixes = [
+            FirmwareAttributeLimitManager::SPL_SUFFIX,
+            FirmwareAttributeLimitManager::SPPT_SUFFIX,
+            FirmwareAttributeLimitManager::FPPT_SUFFIX,
+        ];
+        for (suffix, min, max) in [
+            (suffixes[0], 6, 20),
+            (suffixes[1], 8, 18),
+            (suffixes[2], 9, 19),
+        ] {
+            let attribute = base.join(suffix);
+            create_dir_all(&attribute).await.unwrap();
+            write(attribute.join("current_value"), b"10\n")
+                .await
+                .unwrap();
+            write(attribute.join("min_value"), min.to_string())
+                .await
+                .unwrap();
+            write(attribute.join("max_value"), max.to_string())
+                .await
+                .unwrap();
+        }
+        assert_eq!(manager.get_tdp_limit_range().await.unwrap(), 6..=20);
+        for (limit, expected) in [
+            (6, [6, 8, 9]),
+            (7, [7, 8, 9]),
+            (15, [15, 16, 17]),
+            (18, [18, 18, 19]),
+            (20, [20, 18, 19]),
+        ] {
+            manager.set_tdp_limit(limit).await.unwrap();
+            assert_eq!(manager.get_tdp_limit().await.unwrap(), limit);
+            for (suffix, value) in suffixes.iter().zip(expected) {
+                assert_eq!(
+                    read_to_string(base.join(suffix).join("current_value"))
+                        .await
+                        .unwrap(),
+                    value.to_string(),
+                    "{suffix} for limit {limit}",
+                );
+            }
+        }
+        for limit in [5, 21] {
+            assert!(manager.set_tdp_limit(limit).await.is_err());
+            for (suffix, value) in suffixes.iter().zip([20, 18, 19]) {
+                assert_eq!(
+                    read_to_string(base.join(suffix).join("current_value"))
+                        .await
+                        .unwrap(),
+                    value.to_string(),
+                    "{suffix} changed after rejecting limit {limit}",
+                );
+            }
+        }
     }
 
     #[tokio::test]
@@ -2088,13 +2165,13 @@ pub(crate) mod test {
             read_to_string(sppt_base.join("current_value"))
                 .await
                 .unwrap(),
-            "15"
+            "16"
         );
         assert_eq!(
             read_to_string(fppt_base.join("current_value"))
                 .await
                 .unwrap(),
-            "15"
+            "17"
         );
 
         manager.set_tdp_limit(25).await.unwrap_err();
