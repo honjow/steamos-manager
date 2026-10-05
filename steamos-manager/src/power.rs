@@ -715,7 +715,7 @@ impl PowerStationTdpLimitManager {
     // Check if PowerStation DBus service is running
     async fn check_dbus_service(&self, connection: &zbus::Connection) -> Result<bool> {
         use zbus::fdo;
-        let proxy = fdo::DBusProxy::new(&connection).await?;
+        let proxy = fdo::DBusProxy::new(connection).await?;
         let names = proxy.list_names().await?;
         Ok(names
             .iter()
@@ -724,7 +724,7 @@ impl PowerStationTdpLimitManager {
 
     // Query all available GPU cards from PowerStation
     async fn query_gpu_cards(&self, connection: &zbus::Connection) -> Result<Vec<String>> {
-        let gpu_path = format!("{}", Self::DBUS_BASE_PATH);
+        let gpu_path = Self::DBUS_BASE_PATH.to_string();
 
         // Get a proxy to the GPU interface
         let path = ObjectPath::try_from(gpu_path.as_str())?;
@@ -749,7 +749,7 @@ impl PowerStationTdpLimitManager {
                 let path_str = path.to_string();
                 path_str
                     .split('/')
-                    .last()
+                    .next_back()
                     .filter(|s| s.starts_with(Self::DBUS_CARD_PREFIX))
                     .map(String::from)
             })
