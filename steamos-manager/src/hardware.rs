@@ -380,7 +380,9 @@ impl DeviceConfig {
                                     );
                                     return Ok(Some(device));
                                 }
-                                if product_name.is_some() && product_name == dmi.product_name.as_deref() {
+                                if product_name.is_some()
+                                    && product_name == dmi.product_name.as_deref()
+                                {
                                     tracing::info!(
                                         "Exact match found: {} ({}) via product_name",
                                         device.device,
@@ -407,7 +409,9 @@ impl DeviceConfig {
                                 if !Self::dmi_glob_match(&dmi.sys_vendor, sys_vendor) {
                                     continue;
                                 }
-                                if let (Some(pattern), Some(value)) = (dmi.board_name.as_deref(), board_name) {
+                                if let (Some(pattern), Some(value)) =
+                                    (dmi.board_name.as_deref(), board_name)
+                                {
                                     if Self::dmi_glob_match(pattern, value) {
                                         tracing::info!(
                                             "Wildcard match found: {} ({}) via board_name pattern '{}'",
@@ -418,7 +422,9 @@ impl DeviceConfig {
                                         return Ok(Some(device));
                                     }
                                 }
-                                if let (Some(pattern), Some(value)) = (dmi.product_name.as_deref(), product_name) {
+                                if let (Some(pattern), Some(value)) =
+                                    (dmi.product_name.as_deref(), product_name)
+                                {
                                     if Self::dmi_glob_match(pattern, value) {
                                         tracing::info!(
                                             "Wildcard match found: {} ({}) via product_name pattern '{}'",
@@ -755,6 +761,8 @@ pub mod test {
     #[tokio::test]
     async fn board_lookup_missing() {
         let _h = testing::start();
+        assert!(DeviceInfo::load().await.unwrap().is_none());
+        assert!(DeviceConfig::load().await.unwrap().is_none());
         assert_eq!(
             steam_deck_variant().await.unwrap(),
             SteamDeckVariant::Unknown
@@ -776,7 +784,7 @@ pub mod test {
         );
         assert_eq!(
             device_variant().await.unwrap(),
-            (String::from("unknown"), String::from("unknown"))
+            (String::from("generic"), String::from("Generic"))
         );
     }
 
@@ -1058,7 +1066,7 @@ pub mod test {
         );
         assert_eq!(
             device_variant().await.unwrap(),
-            (String::from("unknown"), String::from("unknown"))
+            (String::from("generic"), String::from("Generic"))
         );
     }
 
@@ -1139,6 +1147,119 @@ pub mod test {
         );
     }
 
+    #[tokio::test]
+    async fn devtree_match_uses_exact_phase_without_dmi() {
+        let _h = setup_device_tree(
+            &["qcom,sm8650"],
+            &[Path::new("board-info/board_revision")],
+            &[],
+        )
+        .await
+        .unwrap();
+        assert!(!try_exists(path(SYS_VENDOR_PATH)).await.unwrap());
+        assert!(matches!(
+            DeviceInfo::load().await.unwrap(),
+            Some(DeviceInfo::DeviceTree { .. })
+        ));
+
+        let frame =
+            DeviceConfig::read_from_path(Path::new(DEVICE_CONFIG_PATH).join("steam-frame.toml"))
+                .await
+                .unwrap();
+        let exact = frame.exact_device_match().await.unwrap().unwrap();
+        assert_eq!(
+            (&*exact.device, &*exact.variant),
+            ("steam_frame", "Deckard")
+        );
+        assert!(frame.device_match().await.unwrap().is_some());
+        assert!(frame.wildcard_device_match().await.unwrap().is_none());
+
+        let generic =
+            DeviceConfig::read_from_path(Path::new(DEVICE_CONFIG_PATH).join("generic.toml"))
+                .await
+                .unwrap();
+        assert!(generic.device_match().await.unwrap().is_none());
+        assert!(generic.wildcard_device_match().await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn devtree_match_requires_compatible_present_and_contents() {
+        let _h = testing::start();
+        let base = path(DEVTREE_BASE);
+        create_dir_all(base.join("board-info")).await.unwrap();
+        write(path(DEVTREE_COMPATIBLE_PATH), b"other,board\0test,board\0")
+            .await
+            .unwrap();
+        let config = DeviceConfig {
+            device: vec![DeviceMatch {
+                dmi: None,
+                dt: Some(DeviceTreeMatch {
+                    compatible: String::from("test,board"),
+                    present: vec![PathBuf::from("board-info/required")],
+                    matches: HashMap::from([(
+                        PathBuf::from("board-info/model"),
+                        String::from("expected"),
+                    )]),
+                }),
+                device: String::from("test"),
+                variant: String::from("exact"),
+                friendly_name: None,
+                oui: None,
+            }],
+            ..DeviceConfig::default()
+        };
+        assert!(config.exact_device_match().await.unwrap().is_none());
+        write(base.join("board-info/required"), b"").await.unwrap();
+        assert!(config.exact_device_match().await.unwrap().is_none());
+        write(base.join("board-info/model"), b"expected\n")
+            .await
+            .unwrap();
+        assert!(config.exact_device_match().await.unwrap().is_none());
+        write(base.join("board-info/model"), b"expected")
+            .await
+            .unwrap();
+        assert!(config.exact_device_match().await.unwrap().is_some());
+        assert!(config.wildcard_device_match().await.unwrap().is_none());
+
+        write(path(DEVTREE_COMPATIBLE_PATH), b"test,*\0")
+            .await
+            .unwrap();
+        assert!(config.device_match().await.unwrap().is_none());
+        write(path(DEVTREE_COMPATIBLE_PATH), b"test,board\0")
+            .await
+            .unwrap();
+        tokio::fs::remove_file(base.join("board-info/model"))
+            .await
+            .unwrap();
+        create_dir_all(base.join("board-info/model")).await.unwrap();
+        assert!(config.exact_device_match().await.is_err());
+    }
+
+    #[tokio::test]
+    async fn device_info_prefers_dmi_when_device_tree_is_present() {
+        let _h = setup_device_tree(
+            &["qcom,sm8650"],
+            &[Path::new("board-info/board_revision")],
+            &[],
+        )
+        .await
+        .unwrap();
+        create_dir_all(path("/sys/class/dmi/id")).await.unwrap();
+        write(path(SYS_VENDOR_PATH), b"Unknown Vendor\n")
+            .await
+            .unwrap();
+        write(path(BOARD_NAME_PATH), b"Unknown Board\n")
+            .await
+            .unwrap();
+        assert!(matches!(
+            DeviceInfo::load().await.unwrap(),
+            Some(DeviceInfo::Dmi { .. })
+        ));
+        let config = DeviceConfig::load().await.unwrap().unwrap();
+        let device = config.device_match().await.unwrap().unwrap();
+        assert_eq!((&*device.device, &*device.variant), ("generic", "Generic"));
+    }
+
     #[test]
     fn ec_logging_state_roundtrip() {
         enum_roundtrip!(ECLoggingState {
@@ -1178,33 +1299,44 @@ pub mod test {
     #[tokio::test]
     async fn test_exact_match_priority_over_wildcard_across_files() {
         let _h = setup_board(
-            "Micro-Star International Co., Ltd.\n", 
-            "MS-1T52\n", 
-            "Claw 8 AI+ A2VM\n"
-        ).await.unwrap();
+            "Micro-Star International Co., Ltd.\n",
+            "MS-1T52\n",
+            "Claw 8 AI+ A2VM\n",
+        )
+        .await
+        .unwrap();
+
+        let generic =
+            DeviceConfig::read_from_path(Path::new(DEVICE_CONFIG_PATH).join("generic.toml"))
+                .await
+                .unwrap();
+        assert!(generic.exact_device_match().await.unwrap().is_none());
+        let wildcard = generic.wildcard_device_match().await.unwrap().unwrap();
+        assert_eq!(
+            (&*wildcard.device, &*wildcard.variant),
+            ("generic", "Generic")
+        );
 
         // This test verifies that existing MSI Claw config takes priority over any generic config
         let (device, variant) = device_variant().await.unwrap();
-        
-        // Should match exact config from existing msi-claw-series.toml instead of generic
+
+        // Should match exact config from msi-claw-intel.toml instead of generic
         // This proves cross-config exact matching priority works
-        assert_eq!(device, "claw8_a2vm");
+        assert_eq!(device, "claw");
         assert_eq!(variant, "Claw 8 AI+ A2VM");
     }
 
     #[tokio::test]
     async fn test_fallback_to_wildcard_when_no_exact_match() {
-        let _h = setup_board(
-            "Unknown Vendor\n",
-            "Unknown Board\n",
-            "Unknown Product\n" 
-        ).await.unwrap();
+        let _h = setup_board("Unknown Vendor\n", "Unknown Board\n", "Unknown Product\n")
+            .await
+            .unwrap();
 
         // No need to setup configs - use existing ones in data/devices/
         // This tests true fallback behavior with real config files
-        
+
         let (device, variant) = device_variant().await.unwrap();
-        
+
         // Should fallback to wildcard matching when no exact match exists
         // Should match generic.toml since no other config will match "Unknown Vendor"
         assert_eq!(device, "generic");
