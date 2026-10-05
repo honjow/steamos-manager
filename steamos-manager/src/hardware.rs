@@ -837,6 +837,41 @@ pub mod test {
     }
 
     #[tokio::test]
+    async fn board_lookup_msi_claw_a8_preserves_custom_profiles() {
+        let _h = setup_board(
+            "Micro-Star International Co., Ltd.\n",
+            "MS-1T8K\n",
+            "Claw A8 BZ2EM\n",
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            device_variant().await.unwrap(),
+            (String::from("claw"), String::from("Claw A8 BZ2EM"))
+        );
+        let config = device_config().await.unwrap().unwrap();
+        let profile = config.performance_profile.as_ref().unwrap();
+        assert_eq!(profile.platform_profile_name, "msi-wmi-platform");
+        assert_eq!(profile.suggested_default, "balanced-performance");
+        let tdp = config.tdp_limit.as_ref().unwrap();
+        assert_eq!(tdp.method, TdpLimitingMethod::FirmwareAttribute);
+        let firmware = tdp.firmware_attribute.as_ref().unwrap();
+        assert_eq!(firmware.attribute, "msi-wmi-platform");
+        assert_eq!(
+            firmware.performance_profile.as_deref(),
+            Some("balanced-performance")
+        );
+        assert_eq!(
+            config.inputplumber.as_ref().unwrap().target_devices,
+            vec![
+                InputPlumberTargetDevice::DeckUhid,
+                InputPlumberTargetDevice::Keyboard,
+                InputPlumberTargetDevice::Mouse,
+            ]
+        );
+    }
+
+    #[tokio::test]
     async fn board_lookup_steam_deck_jupiter() {
         let _h = setup_board("Valve\n", "Jupiter\n", "Jupiter\n")
             .await
