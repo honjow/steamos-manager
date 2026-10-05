@@ -575,12 +575,15 @@ impl TdpLimitManager for FirmwareAttributeLimitManager {
         )
         .await
         .inspect_err(|message| error!("Error writing to sysfs file: {message}"))?;
-        write_synced(
-            base.join(Self::FPPT_SUFFIX).join("current_value"),
-            fppt_value.to_string().as_bytes(),
-        )
-        .await
-        .inspect_err(|message| error!("Error writing to sysfs file: {message}"))?;
+
+        // Only write to FPPT if the path exists
+        let fppt_path = base.join(Self::FPPT_SUFFIX).join("current_value");
+        if try_exists(&fppt_path).await.unwrap_or(false) {
+            write_synced(fppt_path, fppt_value.to_string().as_bytes())
+                .await
+                .inspect_err(|message| error!("Error writing to sysfs file: {message}"))?;
+        }
+
         Ok(())
     }
 
@@ -1901,6 +1904,47 @@ pub(crate) mod test {
 
         fin_tx.send(()).expect("fin");
         task.await.expect("exit").expect("exit2");
+    }
+
+    #[tokio::test]
+    async fn test_firmware_attribute_tdp_limiter_without_fppt() {
+        let _h = testing::start();
+        let manager = FirmwareAttributeLimitManager {
+            attribute: String::from("tdp0"),
+            performance_profile: None,
+        };
+        let base = path(FirmwareAttributeLimitManager::PREFIX)
+            .join("tdp0")
+            .join("attributes");
+        let spl = base.join(FirmwareAttributeLimitManager::SPL_SUFFIX);
+        let sppt = base.join(FirmwareAttributeLimitManager::SPPT_SUFFIX);
+        let fppt = base.join(FirmwareAttributeLimitManager::FPPT_SUFFIX);
+        for attribute in [&spl, &sppt] {
+            create_dir_all(attribute).await.unwrap();
+            write(attribute.join("current_value"), b"10\n")
+                .await
+                .unwrap();
+            write(attribute.join("min_value"), b"6\n").await.unwrap();
+            write(attribute.join("max_value"), b"20\n").await.unwrap();
+        }
+
+        // Both an absent FPPT attribute and an absent current_value are optional.
+        manager.set_tdp_limit(15).await.unwrap();
+        assert_eq!(manager.get_tdp_limit().await.unwrap(), 15);
+        assert!(!try_exists(&fppt).await.unwrap());
+        create_dir_all(&fppt).await.unwrap();
+        manager.set_tdp_limit(14).await.unwrap();
+        assert_eq!(manager.get_tdp_limit().await.unwrap(), 14);
+        assert!(!try_exists(fppt.join("current_value")).await.unwrap());
+
+        // An existing FPPT that cannot be written must still report failure.
+        create_dir_all(fppt.join("current_value")).await.unwrap();
+        assert!(manager.set_tdp_limit(13).await.is_err());
+        fs::remove_dir_all(&fppt).await.unwrap();
+
+        // SPPT remains mandatory even when FPPT is absent.
+        fs::remove_dir_all(&sppt).await.unwrap();
+        assert!(manager.set_tdp_limit(12).await.is_err());
     }
 
     #[tokio::test]
